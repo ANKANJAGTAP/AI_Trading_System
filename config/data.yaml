@@ -1,0 +1,191 @@
+# Section 7 — Data Layer: rate-limit governor, candle aggregation, feed.
+
+# Rate-limit governor: token-bucket per endpoint class. All Kite REST calls are
+# routed through this (no component calls Kite REST directly). Values are
+# conservative defaults below Kite's published hard limits — tune as needed.
+rate_limits:
+  quote:
+    capacity: 1
+    refill_per_sec: 1
+  historical:
+    capacity: 3
+    refill_per_sec: 3
+  order:
+    capacity: 8           # below Kite's ~10/s ceiling
+    refill_per_sec: 8
+  other:
+    capacity: 8
+    refill_per_sec: 8
+  order_count_guard:
+    per_minute_cap: 200
+    daily_cap: 3000       # halt new entries + alert before exchange cap is hit
+    alert_threshold_pct: 80
+
+candles:
+  intervals: ["1m", "3m", "5m", "15m", "day"]
+  attach_oi_at_close: true     # for F&O / MCX
+  persist_immediately: true
+  reconcile_on_reconnect: true # backfill missing candles from historical API
+
+feed:
+  tick_mode_default: "quote"   # ltp | quote | full (full for depth/OI)
+  reconnect_backoff_seconds: [1, 2, 5, 10, 30]
+  max_reconnect_attempts: 0    # 0 = infinite (with backoff)
+  staleness_seconds: 30        # no ticks for this long => treat feed as stale
+  heartbeat_seconds: 5
+  reconnect_after_stale_seconds: 60   # during market hours, rebuild a stale feed
+  market_window: ["09:15", "15:30"]   # NSE; MCX session handled per-sleeve later
+
+# Phase 1 default watchlist for the live feed + backfill. The dynamic
+# profit-oriented universe screening arrives in Phase 4; this is the seed set.
+# Entries are EXCHANGE:TRADINGSYMBOL (indices use the index tradingsymbol).
+universe:
+  # Indices + NIFTY 100 constituents (intraday + swing scan universe). Symbols that
+  # don't resolve in the Kite instrument master are skipped gracefully. NOTE: newly
+  # added names need a historical backfill before sparklines/RVOL/VWAP populate; LTP
+  # arrives from the live feed during market hours.
+  subscribe:
+    - "NSE:NIFTY 50"
+    - "NSE:NIFTY BANK"
+    - "NSE:RELIANCE"
+    - "NSE:TCS"
+    - "NSE:HDFCBANK"
+    - "NSE:ICICIBANK"
+    - "NSE:INFY"
+    - "NSE:HINDUNILVR"
+    - "NSE:ITC"
+    - "NSE:SBIN"
+    - "NSE:BHARTIARTL"
+    - "NSE:KOTAKBANK"
+    - "NSE:LT"
+    - "NSE:BAJFINANCE"
+    - "NSE:HCLTECH"
+    - "NSE:ASIANPAINT"
+    - "NSE:AXISBANK"
+    - "NSE:MARUTI"
+    - "NSE:TITAN"
+    - "NSE:SUNPHARMA"
+    - "NSE:ULTRACEMCO"
+    - "NSE:WIPRO"
+    - "NSE:ONGC"
+    - "NSE:NTPC"
+    - "NSE:NESTLEIND"
+    - "NSE:POWERGRID"
+    - "NSE:M&M"
+    - "NSE:TATAMOTORS"
+    - "NSE:TATASTEEL"
+    - "NSE:ADANIENT"
+    - "NSE:ADANIPORTS"
+    - "NSE:COALINDIA"
+    - "NSE:BAJAJFINSV"
+    - "NSE:GRASIM"
+    - "NSE:HDFCLIFE"
+    - "NSE:SBILIFE"
+    - "NSE:BRITANNIA"
+    - "NSE:DIVISLAB"
+    - "NSE:DRREDDY"
+    - "NSE:CIPLA"
+    - "NSE:EICHERMOT"
+    - "NSE:HEROMOTOCO"
+    - "NSE:BAJAJ-AUTO"
+    - "NSE:INDUSINDBK"
+    - "NSE:TECHM"
+    - "NSE:JSWSTEEL"
+    - "NSE:HINDALCO"
+    - "NSE:APOLLOHOSP"
+    - "NSE:TATACONSUM"
+    - "NSE:BPCL"
+    - "NSE:IOC"
+    - "NSE:SHRIRAMFIN"
+    - "NSE:PIDILITIND"
+    - "NSE:DABUR"
+    - "NSE:GODREJCP"
+    - "NSE:HAVELLS"
+    - "NSE:DLF"
+    - "NSE:AMBUJACEM"
+    - "NSE:MARICO"
+    - "NSE:SIEMENS"
+    - "NSE:BOSCHLTD"
+    - "NSE:GAIL"
+    - "NSE:VEDL"
+    - "NSE:PNB"
+    - "NSE:BANKBARODA"
+    - "NSE:CANBK"
+    - "NSE:ZYDUSLIFE"
+    - "NSE:TORNTPHARM"
+    - "NSE:LUPIN"
+    - "NSE:BIOCON"
+    - "NSE:ALKEM"
+    - "NSE:MOTHERSON"
+    - "NSE:BAJAJHLDNG"
+    - "NSE:ICICIPRULI"
+    - "NSE:ICICIGI"
+    - "NSE:SBICARD"
+    - "NSE:HDFCAMC"
+    - "NSE:MUTHOOTFIN"
+    - "NSE:CHOLAFIN"
+    - "NSE:PFC"
+    - "NSE:RECLTD"
+    - "NSE:IRFC"
+    - "NSE:JINDALSTEL"
+    - "NSE:ADANIGREEN"
+    - "NSE:ADANIENSOL"
+    - "NSE:ADANIPOWER"
+    - "NSE:TATAPOWER"
+    - "NSE:INDIGO"
+    - "NSE:LODHA"
+    - "NSE:GODREJPROP"
+    - "NSE:NAUKRI"
+    - "NSE:IRCTC"
+    - "NSE:INDUSTOWER"
+    - "NSE:LTIM"
+    - "NSE:PERSISTENT"
+    - "NSE:COFORGE"
+    - "NSE:MPHASIS"
+    - "NSE:TRENT"
+    - "NSE:PAGEIND"
+    - "NSE:COLPAL"
+    - "NSE:BERGEPAINT"
+    - "NSE:TVSMOTOR"
+    - "NSE:ETERNAL"
+    - "NSE:JIOFIN"
+    - "NSE:DMART"
+    - "NSE:VBL"
+    - "NSE:UNITDSPR"
+  tick_mode: "full"            # full carries OHLC/depth + OI (for F&O/MCX)
+  # F&O paper universe: (NFO option `name`, its underlying quote key). The slow loop
+  # builds a live FnoContext per entry and routes through the F&O pipeline.
+  fno:
+    - {name: "NIFTY",     underlying: "NSE:NIFTY 50"}
+    - {name: "BANKNIFTY", underlying: "NSE:NIFTY BANK"}
+    - {name: "RELIANCE",  underlying: "NSE:RELIANCE"}
+    - {name: "HDFCBANK",  underlying: "NSE:HDFCBANK"}
+    - {name: "ICICIBANK", underlying: "NSE:ICICIBANK"}
+    - {name: "INFY",      underlying: "NSE:INFY"}
+    - {name: "TCS",       underlying: "NSE:TCS"}
+    - {name: "SBIN",      underlying: "NSE:SBIN"}
+    - {name: "ITC",       underlying: "NSE:ITC"}
+    - {name: "LT",        underlying: "NSE:LT"}
+  # MCX intraday universe: FRONT-MONTH futures resolved dynamically each boot/day
+  # (contract symbols roll monthly, so names - not symbols - live in config).
+  # Mini contracts fit the 10% sleeve on 10L capital; GOLD(1kg)/SILVER(30kg) do not.
+  mcx_futures: ["GOLDM", "SILVERM", "CRUDEOIL", "NATURALGAS"]
+
+backfill:
+  # Canonical interval names (1m/3m/5m/15m/day) map to Kite's historical names in
+  # data/historical.py. Kite caps the date range per request per interval, so the
+  # loader chunks requests using max_days_per_request.
+  intervals: ["day", "15m", "5m", "1m"]
+  lookback_days:
+    day: 2000
+    15m: 365
+    5m: 90
+    1m: 30
+  max_days_per_request:
+    day: 2000
+    15m: 200
+    5m: 100
+    3m: 100
+    1m: 60
+  # Exchanges loaded into the instruments master ([] or omit => full dump).
+  instrument_exchanges: ["NSE", "NFO", "BSE", "MCX", "CDS"]

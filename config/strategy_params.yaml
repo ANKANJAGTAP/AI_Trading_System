@@ -1,0 +1,185 @@
+# Section 5 — The Four Strategy Pipelines. Professional defaults; tune in sim.
+# Every threshold lives here so pipelines change without code edits (Phase 4).
+
+intraday_stocks:                 # 5.1
+  universe:
+    source: ["NIFTY50", "NIFTY100"]
+    min_avg_daily_volume: 500000          # >= 5 lakh shares
+    preferred_avg_daily_volume: [2000000, 5000000]  # 20-50 lakh
+    max_bid_ask_spread_pct: 0.10
+  gap:
+    threshold_pct: 0.5                     # tag gap-up / gap-down > 0.5%
+  regime:
+    use_index_vs_vwap: true
+    use_india_vix: true
+    disable_breakouts_when_choppy: true
+    adx_period: 14
+    adx_trend_min: 20          # ADX >= this => a real trend; below => choppy (no breakouts)
+    adx_strong: 25
+  opening_range:
+    start: "09:15"
+    end: "09:30"
+  orb:
+    max_extension_pct: 0.3       # breakout freshness: entry no further than this %
+                                 # beyond the OR level (no late chases of extended moves)
+    max_stop_distance_pct: 1.5   # skip setups whose stop is wider than this % of price
+  stocks_in_play:                # Zarattini/Barbon/Aziz: the ORB alpha is in SELECTION
+    top_n: 5                     # evaluate only the N highest-RVOL names each cycle
+                                 # (ORB on all stocks ~3%/yr vs top-RVOL ~42%/yr)
+  breadth_gate:                  # day-type filter: WHEN it trades > HOW it trades
+    enabled: true
+    bullish_min_pct: 60          # >= this % of universe above VWAP -> long entries ok
+    bearish_max_pct: 40          # <= this % above VWAP -> short entries ok
+                                 # in between = mixed day -> no ORB entries at all
+  entry_window:
+    start: "09:30"
+    end: "11:00"
+  rvol:
+    orb_min: 1.5
+    orb_ideal: 2.0
+    vwap_pullback_min: 1.2
+    vwap_pullback_max: 1.5
+  time_gates:
+    last_entry: "14:30"
+    soft_exit: "15:10"
+    hard_exit: "15:20"
+  dynamic_exit:                  # profit protection - the MACHINE decides when to leave
+    breakeven_at_r: 1.0          # at +1R unrealized, the stop ratchets to entry: a
+                                 # winner can never round-trip into a loser
+    lock_trigger_frac: 0.8       # within 80% of the target distance...
+    max_giveback_frac: 0.35      # ...never give back more than 35% of the peak gain
+  reward_R: [1.5, 3.0]
+  setups: ["orb", "vwap_pullback"]
+  filters: ["gap_up", "above_vwap", "sector_strong", "high_rvol", "trend_supports"]
+
+fno:                             # 5.2
+  strategy_mix:                  # operator-confirmed default
+    credit_spreads: 0.70
+    debit_spreads: 0.20
+    naked_buying: 0.10
+  no_naked_selling: true         # HARD RULE — defined-risk structures only
+  max_lots_per_structure: 6      # concentration cap (R-budget governs actual size)
+  slippage_pct: 1.5              # backtest: realistic option slippage per premium turnover
+  width_steps: 2                 # wing width in strike steps (100pts NIFTY): 1-step
+                                 # wings lose 15-20% of credit to fees; ~2 is the
+                                 # cost-efficiency sweet spot per spread-width research
+  credit_underlyings: ["NIFTY", "BANKNIFTY"]   # premium selling = INDEX only (tight
+                                 # books, no earnings shocks); stocks may only take
+                                 # the rare low-IV directional debit
+  exits:                         # structure management on COMBINED premium P&L
+    target_fraction: 0.5         # book at 50% of (fill-based) max profit
+    stop_fraction: 0.5           # cut at 50% of (fill-based) max loss — never ride to full
+                                 # defined loss; the defined max remains the gap floor
+    max_fill_risk_overrun: 1.25  # unwind immediately if actual (fill-based) max loss
+                                 # exceeds the modeled max loss the sizing approved by >25%
+    min_exit_dte: 2              # DEBIT time exit: never hold into the last N days
+                                 # before expiry (gamma explosion window)
+    max_holding_days: 10         # DEBIT theta-bleed cap — a structure that hasn't
+                                 # worked in N days is closed, not hoped on
+    credit_min_exit_dte: 21      # CREDIT structures managed at 21 DTE (research:
+                                 # beats hold-to-expiry on risk-adjusted basis)
+    credit_max_holding_days: 0   # disabled — the 21-DTE rule governs credit exits
+    no_mark_before: "09:25"
+    max_book_spread_pct: 8       # a leg whose top-of-book spread exceeds this % is
+                                 # NOT a market: don't mark on it, don't cross it
+    max_close_loss_overrun: 1.15 # never pay more than 115% of the DEFINED max loss
+                                 # to close - a vertical can't cost more than width
+    max_exit_retries: 5          # postpone a stop this many cycles waiting for a
+                                 # sane book, then force at the marks (with alert)      # opening prints are not marks: no structure stop/
+                                 # target/time decisions before this (IST). Jun-12
+                                 # tape: stale-vs-fresh last_prices at 09:15:59 fired
+                                 # a fake stop at -3,989 against a -1,741 plan
+  event_calendar:                # deterministic macro-event gate — maintained manually.
+    block_days_before: 1         # no NEW structures on an event day or N days before it
+    dates:                       # YYYY-MM-DD; add RBI MPC / budget / elections as announced
+      - "2026-06-16"             # FOMC day 1
+      - "2026-06-17"             # FOMC day 2 (statement + presser)
+      - "2026-07-28"             # FOMC day 1
+      - "2026-07-29"             # FOMC day 2
+      - "2026-09-15"             # FOMC day 1
+      - "2026-09-16"             # FOMC day 2
+      - "2026-10-27"             # FOMC day 1
+      - "2026-10-28"             # FOMC day 2
+      - "2026-12-08"             # FOMC day 1
+      - "2026-12-09"             # FOMC day 2
+  iv_rank:
+    low_max: 20                  # < 20  => option buying (debit)
+    medium: [20, 70]             # 20-70 => directional spreads
+    high_min: 70                 # > 70  => premium selling (credit spreads)
+    spike_block_chg_pct: 15      # vol-direction guard: no fresh credit selling when
+                                 # ATM IV rose more than this % over ~5 sessions
+  dte:
+    swing_buy: [21, 50]           # medium-IV credit window — includes monthlies (46 DTE)
+    positional_buy: [30, 60]
+    weekly_buy: [3, 10]
+    credit_sell: [30, 45]        # research-converged premium-harvest window: enter
+                                 # 30-45 DTE, manage at 21 DTE (weeklies = gamma risk)
+    avoid: [0, 1]                # no 0/1 DTE or expiry-day gambling
+    credit_book_pct: 0.50        # close early ~50% of max premium
+  delta:
+    buyer: [0.40, 0.60]
+    credit_short_leg: [0.15, 0.22]   # ~80% PoP zone; best theta-per-risk in studies
+    condor_leg: [0.10, 0.20]
+  block_on_expiry_day: true      # no NEW structures on the underlying's expiry day
+                                 # (pinning-driven, non-fundamental moves)
+  oi_buildup:                    # context interpretation matrix
+    price_up_oi_up: "long_buildup_bullish"
+    price_down_oi_up: "short_buildup_bearish"
+    price_up_oi_down: "short_covering"
+    price_down_oi_down: "long_unwinding"
+  context_only: ["pcr", "max_pain"]
+  liquidity:
+    require_oi: true
+    require_volume: true
+    require_tight_spread: true
+
+swing_stocks:                    # 5.3
+  universe:
+    source: ["NIFTY100", "largecap", "strong_midcap"]
+  use_adjusted_series: true      # split/bonus-adjusted for all indicators & screens
+  fundamentals:
+    market_cap_min_cr: 5000
+    roe_min_pct: 15
+    revenue_growth_min_pct: 10
+    eps_growth_min_pct: 15
+    debt_equity_max: 0.5
+    promoter_holding: "stable_or_rising"
+    avg_daily_volume_min: 1000000          # > 10 lakh shares
+    price_above_200dma: true
+  regime:
+    require_market_uptrend: true
+    bear_market_action: "reduce_or_cash"
+  sector_strength:
+    require_outperforming_index: true
+  technical:
+    require_above_key_mas: true
+    setups: ["pullback_to_support", "base_breakout"]
+    require_volume_confirmation: true
+  event_gate:
+    on_event_in_holding_window: "reduce_or_skip"
+  holding_horizon:
+    target_days: [5, 20]
+    soft_limit_days: 30
+    hard_limit_days: 60
+  stops:
+    method: ["atr", "swing_low", "support"]
+    atr_multiple: 2.0
+    trail_on: "daily"
+  exit_mode: "target"            # "target" (fixed 2R) | "trail" (ride the trend — let winners run)
+
+mcx_commodities:                 # 5.4
+  instruments: ["GOLD", "GOLDM", "SILVER", "SILVERM", "CRUDEOIL", "NATURALGAS"]
+  options: "liquid_only"
+  session:
+    source: "exchange_calendar"
+    approx_open: "09:00"
+    approx_close: "23:30"
+    hard_exit: "23:15"           # intraday square-off — never carry into the close
+  intraday:
+    style: ["vwap", "orb"]       # adapted to commodity session open
+    entry_window:                # commodity entries (engine loop runs 09:15-15:30 IST;
+      start: "09:30"             # evening-session entries arrive with a later phase)
+      end: "15:00"
+  swing:
+    trend_following: true
+    fundamental_filter: false    # use LLM macro/inventory context instead (optional)

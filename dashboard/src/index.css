@@ -1,0 +1,119 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ============================================================
+   Design tokens — "Night Desk" (frontend_v2 §2). Everything derives from here.
+   ============================================================ */
+:root {
+  --ink: #0a0c12;
+  --surface: #12151e;
+  --surface-raised: #1a1e2a;
+  --surface-inset: #0e111a;
+  --line: #252a38;
+  --line-strong: #313747;
+  --text-hi: #e8ecf4;
+  --text-lo: #8a93a6;
+  --text-faint: #5a6172;
+
+  --brand: #4fd1e0;
+  --long: #34d399;
+  --short: #f87171;
+  --warn: #fbbf24;
+  --info: #818cf8;
+
+  --mode-sim: #6b7aa8;
+  --mode-live: #ff5c38;
+
+  --heat-pos-3: #065f46;
+  --heat-pos-2: #10b981;
+  --heat-pos-1: #6ee7b7;
+  --heat-neg-1: #fca5a5;
+  --heat-neg-2: #ef4444;
+  --heat-neg-3: #7f1d1d;
+  --heat-zero: #1a1e2a;
+
+  /* density (comfortable default; §2.3) */
+  --row-h: 28px;
+  --pad: 12px;
+  --data-size: 12px;
+}
+[data-density="compact"] { --row-h: 24px; --pad: 8px; --data-size: 12px; }
+[data-density="ultra"]   { --row-h: 20px; --pad: 6px;  --data-size: 11px; }
+
+* { border-color: var(--line); }
+html, body, #root { height: 100%; }
+body {
+  margin: 0;
+  background: var(--ink);
+  color: var(--text-hi);
+  font-family: Geist, Inter, system-ui, sans-serif;
+  font-size: 13px;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+.mono, .tnum {
+  font-family: "Geist Mono", "JetBrains Mono", ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
+}
+.eyebrow {
+  text-transform: uppercase;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  color: var(--text-lo);
+}
+
+/* a11y: visible cyan focus ring on every control */
+:focus-visible { outline: 2px solid var(--brand); outline-offset: 1px; border-radius: 3px; }
+
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-thumb { background: var(--line-strong); border-radius: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+
+/* motion (§2.5) */
+@keyframes tick-up { from { background-color: color-mix(in srgb, var(--long) 35%, transparent); } to { background-color: transparent; } }
+@keyframes tick-down { from { background-color: color-mix(in srgb, var(--short) 35%, transparent); } to { background-color: transparent; } }
+.tick-up { animation: tick-up 180ms ease-out; }
+.tick-down { animation: tick-down 180ms ease-out; }
+@keyframes alarm-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+.alarm-pulse { animation: alarm-pulse 1.4s ease-in-out infinite; }
+@keyframes live-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+.live-pulse { animation: live-pulse 2s ease-in-out infinite; }
+
+/* ticker tape marquee — content is rendered twice; -50% scrolls exactly one copy */
+@keyframes ticker-scroll { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+.ticker-track { width: max-content; animation: ticker-scroll 90s linear infinite; }
+.ticker-track:hover { animation-play-state: paused; }
+@media (prefers-reduced-motion: reduce) { .ticker-track { animation: none; } }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}
+
+/* react-grid-layout — token-aligned placeholder + self-contained resize handle */
+.react-grid-item.react-grid-placeholder { background: var(--brand); opacity: 0.12; border-radius: 6px; }
+.react-resizable { position: relative; }
+.react-resizable-handle {
+  position: absolute; width: 18px; height: 18px; bottom: 0; right: 0; cursor: se-resize; opacity: 0.5;
+}
+.react-resizable-handle::after {
+  content: ""; position: absolute; right: 3px; bottom: 3px; width: 5px; height: 5px;
+  border-right: 2px solid var(--text-lo); border-bottom: 2px solid var(--text-lo);
+}
+.stale { filter: saturate(0.25) brightness(0.85); }
+
+/* Command palette (cmdk) — token-themed */
+[cmdk-overlay] { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.5); z-index: 70; }
+[cmdk-dialog] { position: fixed; top: 16%; left: 50%; transform: translateX(-50%); width: 560px; max-width: 92vw; z-index: 71; }
+[cmdk-root] { background: var(--surface-raised); border: 1px solid var(--line-strong); border-radius: 8px; overflow: hidden; box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5); }
+[cmdk-input] { width: 100%; background: transparent; border: 0; padding: 12px 14px; color: var(--text-hi); font-size: 14px; outline: none; border-bottom: 1px solid var(--line); }
+[cmdk-list] { max-height: 340px; overflow: auto; padding: 6px; }
+[cmdk-group-heading] { font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-faint); padding: 8px 8px 4px; }
+[cmdk-item] { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-radius: 6px; color: var(--text-lo); font-size: 13px; cursor: pointer; }
+[cmdk-item][data-selected="true"] { background: var(--surface-inset); color: var(--text-hi); box-shadow: inset 2px 0 0 var(--brand); }
+[cmdk-empty] { padding: 16px; color: var(--text-faint); font-size: 13px; }

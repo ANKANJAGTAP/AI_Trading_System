@@ -1,0 +1,48 @@
+# LOCAL-ONLY override (do NOT copy to AWS). Points the local api/dashboard at the
+# AWS production database through an SSH tunnel, so the local UI shows the live AWS
+# account without running a second trading engine. The shared docker-compose.yml is
+# unchanged. Tear down with: docker compose stop db-tunnel && (restore api env).
+services:
+  # SSH tunnel sidecar: one ssh connection forwarding BOTH the AWS DB and AWS Redis
+  #   db-tunnel:5432 -> (AWS host) localhost:5544 -> AWS Postgres
+  #   db-tunnel:6379 -> (AWS host) localhost:6399 -> AWS Redis
+  # No host port is published; AWS stays closed to the internet (SG: SSH/22 only).
+  db-tunnel:
+    image: alpine:3.20
+    restart: unless-stopped
+    volumes:
+      - /home/ankan/.ssh/ats-key.pem:/key.pem:ro
+    command:
+      - sh
+      - -c
+      - >-
+        apk add --no-cache openssh-client >/dev/null 2>&1;
+        cp /key.pem /tmp/k; chmod 600 /tmp/k;
+        while true; do
+        echo "[db-tunnel] connecting to AWS DB+Redis...";
+        ssh -i /tmp/k -N
+        -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/tmp/known
+        -o ExitOnForwardFailure=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=3
+        -L 0.0.0.0:5432:localhost:5544
+        -L 0.0.0.0:6379:localhost:6399 ubuntu@43.205.112.232;
+        echo "[db-tunnel] disconnected; retrying in 5s"; sleep 5;
+        done
+    healthcheck:
+      test: ["CMD-SHELL", "for p in 5432 6379; do netstat -ltn 2>/dev/null | grep -q \":$p\" || exit 1; done"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
+
+  # Repoint the local control plane + dashboard at the AWS DB AND Redis (via the tunnel).
+  api:
+    environment:
+      POSTGRES_HOST: db-tunnel
+      POSTGRES_PORT: 5432
+      REDIS_HOST: db-tunnel
+      REDIS_PORT: 6379
+    depends_on:
+      db-tunnel:
+        condition: service_healthy
+      redis:
+        condition: service_healthy

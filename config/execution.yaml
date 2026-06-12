@@ -1,0 +1,67 @@
+# Section 8 — Execution & Order Management.
+# mode is the single operator-controlled switch. simulated_fill is the DEFAULT
+# and must never send a real order. Flip to live MANUALLY from the dashboard.
+
+mode: simulated_fill           # simulated_fill | live
+default_order_type: MARKET     # per-setup selection overrides (MARKET | LIMIT)
+slippage_bps: 2.0              # modelled slippage for simulated fills
+
+# Cost model (always on, both modes). Indian/Zerodha defaults — calibrate in sim.
+# All values are placeholders to refine during the simulated-fill phase.
+cost_model:
+  equity_intraday:           # MIS
+    brokerage_pct: 0.03      # 0.03% or flat cap, whichever lower
+    brokerage_flat_cap: 20.0
+    stt_pct: 0.025           # sell side
+    exchange_txn_pct: 0.00345
+    gst_pct: 18.0            # on (brokerage + txn)
+    sebi_per_cr: 10.0
+    stamp_pct: 0.003         # buy side
+  equity_delivery:           # CNC
+    brokerage_pct: 0.0
+    brokerage_flat_cap: 0.0
+    stt_pct: 0.1             # both sides
+    exchange_txn_pct: 0.00345
+    gst_pct: 18.0
+    sebi_per_cr: 10.0
+    stamp_pct: 0.015         # buy side
+  fno_options:
+    brokerage_flat: 20.0     # per executed order
+    stt_pct: 0.1             # on sell premium (bites on expiry)
+    exchange_txn_pct: 0.05
+    gst_pct: 18.0
+    sebi_per_cr: 10.0
+    stamp_pct: 0.003         # buy side
+  fno_futures:
+    brokerage_flat: 20.0
+    stt_pct: 0.02            # sell side
+    exchange_txn_pct: 0.0019
+    gst_pct: 18.0
+    sebi_per_cr: 10.0
+    stamp_pct: 0.002
+  mcx_futures:
+    brokerage_flat: 20.0
+    ctt_pct: 0.01            # sell side (commodities transaction tax)
+    exchange_txn_pct: 0.0026
+    gst_pct: 18.0
+    sebi_per_cr: 10.0
+    stamp_pct: 0.002
+
+# Order lifecycle handling (spec §8).
+partial_fill:
+  chase_remainder: false     # default: cancel remainder, manage what filled
+  chase_price_band_pct: 0.2  # if chasing, re-quote limit within this band
+  size_bracket_to_filled: true
+
+rejection:
+  retry_transient_only: true # never blindly retry margin/circuit/ban rejects
+  max_retries: 2
+  retry_backoff_seconds: 2
+
+freeze_quantity:
+  enabled: true              # slice large F&O orders into allowed clips
+  # per-instrument freeze limits resolved at runtime from exchange data
+
+oco_gtt:
+  prefer_gtt: true           # use GTT/OCO brackets where supported
+  bracket: true              # entry + stop + target

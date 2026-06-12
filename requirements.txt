@@ -1,0 +1,46 @@
+# --- Core / config ---
+pydantic>=2.6,<3
+pydantic-settings>=2.2,<3
+PyYAML>=6.0
+python-dotenv>=1.0
+
+# --- Broker / auth ---
+# Upper bounds cap surprise majors on a rebuild. For full reproducibility, generate
+# a lockfile (pip-compile / uv pip compile) and install from it in CI/prod.
+kiteconnect>=4.2.0,<6
+pyotp>=2.9.0,<3
+requests>=2.31,<3
+
+# --- Data / DB / cache ---
+asyncpg>=0.29
+redis>=5.0
+
+# --- API / async ---
+fastapi>=0.110
+uvicorn[standard]>=0.29
+websockets>=12.0
+httpx>=0.27
+
+# --- Scheduling ---
+APScheduler>=3.10
+
+# --- Logging ---
+structlog>=24.1
+
+# --- Secure token storage ---
+cryptography>=42.0
+
+# --- Numerics (used from Phase 1) ---
+pandas>=2.2
+numpy>=1.26
+
+# --- Phase 1+: indicators & options math (enable when starting Phase 1) ---
+# pandas-ta>=0.3.14b0
+# py_vollib>=1.0.1
+
+# --- Phase 5: LLM (provider-swappable: Gemini dev / Anthropic prod) ---
+anthropic>=0.40,<1.0
+google-genai>=0.3,<2
+
+# --- Dev / test ---
+pytest>=8.0,<9

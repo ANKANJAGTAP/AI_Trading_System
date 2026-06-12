@@ -1,0 +1,29 @@
+# secrets
+.env
+.secrets/
+*.pem
+
+# local assistant / IDE state
+.claude/
+
+# python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env.local
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+
+# data / logs
+*.log
+data/local/
+dumps/
+
+# node (dashboard)
+dashboard/node_modules/
+dashboard/dist/
+
+# os
+.DS_Store

@@ -1,0 +1,107 @@
+# Section 4 — Core Risk Model (applies to all sleeves).
+# All values operator-tunable. R = rupee amount risked per trade (% of LIVE capital).
+
+# Paper-run overlay (applied by the engine only, leaving the canonical spec risk
+# below untouched). When paper_capital > 0 the engine uses it as STATIC capital
+# instead of live Kite margins (still simulated_fill — NO real orders) and applies
+# the paper risk % below. Set paper_capital: 0 to return to live capital + spec risk.
+paper_capital: 1000000          # ₹10L requested paper notional
+paper_per_trade_pct: 1.0        # paper run: 1% R per trade (operator cut from 2%,
+                                # 2026-06-12 — daily swings were too large)
+paper_daily_max_loss_pct: 2.5   # paper run: 2.5% daily kill-switch (was 4%)
+paper_compound: true            # sizing follows the RUNNING balance (10L + cumulative
+                                # realized P&L) — the month answers "what happens to my
+                                # 10L" with compounding, not fixed-notional trading
+
+per_trade_risk_pct:        # R as % of live capital (spec canonical)
+  min: 1.0
+  max: 2.0
+  default: 1.0
+
+daily_max_loss_pct:        # kill-switch trigger (spec canonical)
+  min: 1.0
+  max: 4.0
+  default: 3.0
+
+portfolio_risk_limit_pct:  # max aggregate open R at once
+  default: 4.0             # 4% / 1% per trade => max 4 concurrent 1R positions
+                           # (cut from 6% with the per-trade reduction, 2026-06-12)
+
+leverage:
+  mode: only_when_needed
+  target_effective_exposure: [1.5, 3.0]   # never max available
+
+per_instrument_cap_pct: 15.0   # no single instrument > this % of capital
+
+# Concentration: max aggregate OPEN R on one underlying across all its strikes /
+# structures / legs. The per-instrument cap is per tradingsymbol, so stacked strikes
+# of the same name would otherwise bypass it. 4% = two full 2R paper trades.
+per_underlying_risk_pct: 4.0
+
+kill_switch:
+  flatten_on_trip: true        # on trip: block entries AND square off (Phase 3 executes)
+  correlation_threshold: 0.7   # daily-return corr above this = correlated cluster
+  correlation_lookback: 120    # trading days of daily candles for correlation
+
+# Phase 3.2 — soft circuits (block NEW entries only; do NOT flatten — that's the
+# kill switch's job at the daily hard-loss line).
+max_drawdown_pct: 8.0          # intraday equity drawdown from peak -> halt new entries
+# Profit lock: once the day's peak P&L clears trigger_pct of capital, stop new entries
+# if more than max_giveback_pct of that peak is given back (locks in green days).
+profit_lock:
+  trigger_pct: 2.0             # arm once peak day-P&L >= 2% of capital
+  max_giveback_pct: 35.0       # then halt if we give back >35% of the peak
+strategy_guard:
+  lookback_trades: 20          # rolling window of recent closed trades per sleeve
+  min_trades: 10               # need at least this many before acting (avoid noise)
+  expectancy_floor: -0.2       # mean R below this over the window -> auto-disable sleeve
+  # KILL CRITERIA (written in advance — Tier-3 process discipline). Once a sleeve has
+  # a real sample, a negative lifetime expectancy is a verdict, not noise: the sleeve
+  # is disabled and stays down until a HUMAN reviews it (no auto re-enable, no
+  # negotiating with a losing system after the fact).
+  review_min_trades: 60        # evaluate only after this many closed trades (lifetime)
+  review_expectancy_floor: -0.1  # mean R below this over the lifetime -> kill + review
+
+# Loss-minimisation: after a position/structure closes, block re-entry on the same
+# instrument/underlying for this many minutes (kills the churn loop).
+reentry_cooldown_minutes: 20
+
+# Period brakes — the daily kill-switch can't stop a slow bleed (-3.9%/day for weeks
+# never trips anything). Realized week/month loss beyond these lines blocks NEW
+# entries for the REST of that period (latched; auto-resets when the period rolls).
+period_brakes:
+  weekly_max_loss_pct: 6.0     # realized loss since Monday
+  monthly_max_loss_pct: 10.0   # realized loss since the 1st
+
+# Activity brakes (per day, evaluated continuously, reset at midnight IST):
+trade_brakes:
+  max_trades_per_day: 15       # structures count once (correlation_id), not per leg
+  max_consecutive_losses: 4    # per sleeve: N straight losing trades today -> that
+                               # sleeve stops entering for the rest of the day
+
+# Cost-aware edge gate: skip a trade when the round-trip costs exceed this fraction
+# of the expected reward at target. Heavily-clamped (tiny) positions otherwise bleed
+# brokerage/STT against micro-profits — fees are a position's first enemy.
+cost_edge_max_fraction: 0.15
+
+# Risk-utilization floor: if caps/margin clamp a position below this fraction of the
+# intended R, skip the trade entirely (a 1-share position risking Rs 9 against a
+# Rs 20k budget is noise, not a trade — today's tape: HCLTECH/ZYDUSLIFE qty 1).
+# Calibration: the 15% per-instrument NOTIONAL cap with a ~0.7% stop already limits
+# healthy equity trades to ~3-6% utilization (NESTLEIND's good 107-share trade was
+# 2.7%) — so 1% separates "clamped but real" from "degenerate token position".
+min_risk_utilization: 0.01
+
+# Volatility-scaled sizing: full size at/below reference_vix; above it, per-trade R
+# shrinks proportionally (ref/VIX), floored at min_scale. High VIX in India also
+# spikes margins — positions sized for calm regimes get force-liquidated in storms.
+vol_scaling:
+  enabled: true
+  reference_vix: 15.0
+  min_scale: 0.4
+
+# Position sizing (canonical, spec §4):
+#   Stop-Loss %     = (entry_price - stop_price) / entry_price
+#   Capital alloc   = Risk Amount / Stop-Loss %   (== Quantity * entry_price)
+#   Quantity        = Risk Amount (R, ₹) / (entry_price - stop_price)
+#   Max Positions   = Portfolio Risk Limit / Risk Per Trade

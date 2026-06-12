@@ -1,0 +1,24 @@
+# Section 3 — Capital, Sleeves & Allocation.
+# Caps are limits on DEPLOYED capital / open risk per sleeve, NOT a guarantee of
+# free margin. Live available margin from Kite is always the final clamp.
+# No sleeve may borrow another sleeve's cap; unused cap stays idle (cash is valid).
+
+# Re-weighted 2026-06-12 (operator decision): F&O is the primary sleeve — the
+# defined-risk premium-selling engine carries the book; intraday is a satellite.
+sleeves:
+  intraday_stocks:
+    cap_pct: 20.0
+    enabled: true
+    instruments: "NSE equity, MIS"
+  fno:
+    cap_pct: 45.0
+    enabled: true
+    instruments: "Index credit structures (NIFTY/BANKNIFTY) + rare low-IV stock debit"
+  swing_stocks:
+    cap_pct: 25.0
+    enabled: true
+    instruments: "Nifty-100 + strong mid/large caps, CNC"
+  mcx_commodities:
+    cap_pct: 10.0
+    enabled: true
+    instruments: "Gold, GoldM, Silver, SilverM, Crude, NaturalGas (futures + liquid options)"

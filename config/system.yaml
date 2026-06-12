@@ -1,0 +1,78 @@
+# System-level configuration: sessions, scheduler, LLM, alerts.
+
+timezone: "Asia/Kolkata"
+token_refresh_time: "08:00"      # IST — automated TOTP login before market open
+
+# Trading sessions. MCX runs extended hours; square-off / last-entry gates use
+# the relevant session, not the equity session. Exact MCX timings load from the
+# exchange calendar at runtime.
+market:
+  equity:
+    open: "09:15"
+    close: "15:30"
+  mcx:
+    open: "09:00"
+    close: "23:30"
+
+# LLM Context & News layer (Phase 5). Off the hot path; single Claude call on the
+# slow loop. Can only veto/downsize, never originate. Fail-neutral on error.
+llm:
+  provider: gemini               # dev/paper: free Gemini. PROD: set to "anthropic".
+  gemini_model: "gemini-2.5-flash"
+  models:
+    news_synthesis: "claude-sonnet-4-6"          # anthropic (prod) veto + synthesis
+    news_classification: "claude-haiku-4-5-20251001"  # high-volume classification
+  timeout_seconds: 20
+  fail_mode: neutral             # on failure/timeout: no veto, no boost
+  max_news_items: 25
+
+# Confidence model (Phase 5): transparent weighted combination of gate scores ->
+# a single 0-1 confidence that maps to size within the R cap. No opaque ML (v1).
+confidence:
+  min_confidence: 0.45           # below this -> skip the trade
+  default_weight: 1.0
+  gate_weights:                  # decisive gates weigh more
+    regime: 1.5
+    confirmation: 1.5
+    iv_regime: 1.5
+    fundamentals: 1.5
+    structure: 1.2
+    greeks: 1.2
+    technical_setup: 1.2
+    above_200dma: 1.2
+    momentum: 1.0             # MACD + SuperTrend confirmation (Phase 2)
+
+# Meta-label filter (Phase 4). Off by default — train + validate a model first, then
+# enable. It can only shrink confidence (filter), never originate or upsize a trade.
+meta_label:
+  enabled: true                # armed: loads the active model at boot; fail-neutral
+                               # (no model influence) until one passes validation
+  retrain_time: "16:30"        # IST — nightly retrain after close + backfill
+  min_samples: 80              # don't train below this many fully-closed trades
+  min_test: 15                 # small-data fallback: newest-20% test window minimum
+  min_lift: 0.05               # mean OOS lift must clear this, else stays inactive
+  min_class_samples: 15        # need at least this many wins AND losses
+  # Purged expanding-window CV (Lopez de Prado): sequential folds, embargo 1 —
+  # the verdict rests on MULTIPLE out-of-sample windows, never one lucky split.
+  cv_folds: 4
+  min_test_per_fold: 8         # below this per fold -> fall back to single split
+  recency_half_life_trades: 60 # production refit: a trade 60 trades ago counts half
+  max_features: 12             # leak-free pruning (ranked on oldest 80% only)
+  # deployment thresholds (ship inside the trained model):
+  veto_below: 0.40             # win-prob below this -> trade vetoed (confidence -> 0)
+  neutral_above: 0.55          # win-prob above this -> no change (never inflates)
+  soft_floor: 0.6              # mild shrink floor inside the dead band
+
+# Email alerts (SMTP). Events that must notify the operator (spec §9).
+alerts:
+  email_enabled: true
+  events:
+    - trade_entered
+    - trade_exited
+    - stop_or_target_hit
+    - kill_switch_triggered
+    - safe_exit_event
+    - auth_token_failure
+    - data_feed_disconnect
+    - reconciliation_mismatch
+    - daily_eod_summary

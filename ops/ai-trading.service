@@ -1,0 +1,21 @@
+# systemd unit for always-on operation on a VPS.
+# Install: copy to /etc/systemd/system/ai-trading.service, set WorkingDirectory
+# to the repo path, then: systemctl daemon-reload && systemctl enable --now ai-trading
+[Unit]
+Description=AI Trading System (docker compose stack)
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/ai-trading-system
+ExecStartPre=/usr/bin/docker compose pull --ignore-pull-failures
+ExecStart=/usr/bin/docker compose up
+ExecStop=/usr/bin/docker compose down
+Restart=always
+RestartSec=10
+TimeoutStartSec=0
+
+[Install]
+WantedBy=multi-user.target

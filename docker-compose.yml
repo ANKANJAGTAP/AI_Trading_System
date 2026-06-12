@@ -1,0 +1,108 @@
+# AI Trading System — local/VPS stack. Restart-on-failure for always-on operation.
+# Host-published ports default to non-standard values to avoid colliding with a
+# native Postgres (5432) / Redis (6379) on the host. Container-to-container
+# traffic uses the compose network (timescaledb:5432, redis:6379) regardless.
+services:
+  timescaledb:
+    image: timescale/timescaledb:latest-pg16
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-ats}
+      POSTGRES_USER: ${POSTGRES_USER:-ats}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ats}
+    ports:
+      - "${POSTGRES_HOST_PORT:-5544}:5432"
+    volumes:
+      - tsdb_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-ats}"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "${REDIS_HOST_PORT:-6399}:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
+
+  api:
+    build: .
+    command: ["api"]
+    env_file: .env
+    environment:
+      POSTGRES_HOST: timescaledb
+      REDIS_HOST: redis
+      TZ: Asia/Kolkata
+    volumes:
+      - ./.secrets:/app/.secrets    # shared Kite token (read-only) for live data reads
+    ports:
+      # Bound to localhost by default — the control plane trades and flattens, so it
+      # must NOT be exposed on all interfaces. Front it with an authenticating proxy
+      # (and set API_AUTH_TOKEN) to publish externally.
+      - "${API_BIND_ADDR:-127.0.0.1}:${API_HOST_PORT:-8000}:8000"
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health', timeout=3).status==200 else 1)\""]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+
+  engine:
+    build: .
+    command: ["engine"]
+    env_file: .env
+    environment:
+      POSTGRES_HOST: timescaledb
+      REDIS_HOST: redis
+      TZ: Asia/Kolkata
+    volumes:
+      - ./.secrets:/app/.secrets
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  dashboard:
+    build: ./dashboard
+    ports:
+      # Operator UI, bound to localhost by default. Access remotely with an SSH
+      # tunnel unless you put an authenticating HTTPS proxy in front of it.
+      - "${DASHBOARD_BIND_ADDR:-127.0.0.1}:${DASHBOARD_HOST_PORT:-5173}:80"
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1/ >/dev/null"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  cloudflare-tunnel:
+    image: cloudflare/cloudflared:latest
+    command: ["tunnel", "--no-autoupdate", "--url", "http://dashboard:80"]
+    depends_on:
+      dashboard:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  tsdb_data:
+  redis_data:
