@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+.pytest_cache/
+.mypy_cache/
+.ipynb_checkpoints/
+.venv/
+venv/
+
+# Data platform local data — NEVER commit market data or DB files
+.aitrading_data/
+*.parquet
+*.duckdb
+operational.db
+
+# Secrets / env (exchange & broker credentials must stay out of git)
+.env
+.env.*
+.secrets/
+*.pem
+*.key
+*.token
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
