@@ -3,7 +3,7 @@ from .base import VendorAdapter, CANONICAL_EOD_COLUMNS, validate_canonical, empt
 from .synthetic import SyntheticEODAdapter
 from .nse_bhavcopy import NSEBhavcopyAdapter, parse_udiff_csv, parse_legacy_csv
 from .bse_bhavcopy import BSEBhavcopyAdapter, parse_bse_udiff_csv
-from .kite import KiteAdapter
+from .kite import KiteAdapter, KiteHistoricalAdapter, KiteInstruments, KITE_FIELDMAP
 from .fieldmap import FieldMap, normalize
 from .bar_vendor import BarVendorAdapter
 from .truedata import TrueDataAdapter, truedata_symbol, TRUEDATA_FIELDMAP
@@ -14,7 +14,7 @@ __all__ = [
     "SyntheticEODAdapter",
     "NSEBhavcopyAdapter", "parse_udiff_csv", "parse_legacy_csv",
     "BSEBhavcopyAdapter", "parse_bse_udiff_csv",
-    "KiteAdapter",
+    "KiteAdapter", "KiteHistoricalAdapter", "KiteInstruments", "KITE_FIELDMAP",
     "FieldMap", "normalize", "BarVendorAdapter",
     "TrueDataAdapter", "truedata_symbol", "TRUEDATA_FIELDMAP",
     "GlobalDatafeedsAdapter", "gdfl_symbol", "GDFL_FIELDMAP",

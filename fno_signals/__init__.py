@@ -14,8 +14,9 @@ data, feature, ML-validation and backtest pillars.
   risk        : kill-switch, portfolio-R, options-aware scenario gate
   pipeline    : decide() -> TradeDecision (the capstone)
 """
-from . import context, signal, gates, regime, structures, sizing, risk, pipeline  # noqa: F401
+from . import context, signal, gates, regime, structures, sizing, risk, pipeline, execution  # noqa: F401
 from .context import MarketContext
+from .execution import to_kite_orders, place_orders
 from .signal import Signal, generate_signal
 from .gates import GateConfig, run_hard_gates
 from .regime import iv_regime, route
@@ -26,8 +27,9 @@ from .pipeline import DecisionConfig, TradeDecision, decide
 
 __version__ = "0.1.0"
 __all__ = [
-    "context", "signal", "gates", "regime", "structures", "sizing", "risk", "pipeline",
+    "context", "signal", "gates", "regime", "structures", "sizing", "risk", "pipeline", "execution",
     "MarketContext", "Signal", "generate_signal",
+    "to_kite_orders", "place_orders",
     "GateConfig", "run_hard_gates", "iv_regime", "route",
     "select_structure", "one_lot_max_loss",
     "SizingConfig", "effective_R", "size_lots",
