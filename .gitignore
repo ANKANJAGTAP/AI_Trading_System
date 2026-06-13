@@ -1,29 +1,42 @@
-# secrets
+# ── Secrets / env (never commit broker or exchange credentials) ──
 .env
+.env.*
 .secrets/
 *.pem
+*.key
+*.token
 
-# local assistant / IDE state
+# ── Local assistant / IDE state ──
 .claude/
+.idea/
+.vscode/
 
-# python
+# ── Python ──
 __pycache__/
 *.py[cod]
+*.egg-info/
+.eggs/
 .venv/
 venv/
-.env.local
 .mypy_cache/
 .ruff_cache/
 .pytest_cache/
+.ipynb_checkpoints/
 
-# data / logs
+# ── Data platform local data (never commit market data or DB files) ──
+.aitrading_data/
+*.parquet
+*.duckdb
+operational.db
+
+# ── Data / logs ──
 *.log
 data/local/
 dumps/
 
-# node (dashboard)
+# ── Node (dashboard) ──
 dashboard/node_modules/
 dashboard/dist/
 
-# os
+# ── OS ──
 .DS_Store

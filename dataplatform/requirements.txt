@@ -1,0 +1,11 @@
+# Core (required to run the package + tests, offline)
+pandas>=2.0
+pyarrow>=14.0
+duckdb>=0.10
+pytest>=7.0
+
+# Optional — enable as you wire up real sources/infra
+# psycopg2-binary>=2.9     # TimescaleDB/Postgres operational store
+# kiteconnect>=4.2         # Zerodha Kite live + recent candles
+# prefect>=2.0             # ingestion DAG orchestration
+# requests>=2.31           # robust NSE/BSE downloads (cookie warming)
