@@ -111,6 +111,18 @@ class KiteHistoricalAdapter(BarVendorAdapter):
         self.instruments = instruments
         self._kite = None
 
+    @classmethod
+    def from_token_store(cls, instruments: KiteInstruments | None = None,
+                         underlyings=("NIFTY", "FINNIFTY", "SENSEX")) -> "KiteHistoricalAdapter":
+        """Build the adapter using today's stored access token (see dataplatform.kite_auth)."""
+        from ..kite_auth import load_token
+        token = load_token(
+            os.environ.get("TOKEN_STORE_PATH", ".secrets/kite_token.json"),
+            os.environ.get("TOKEN_ENCRYPTION_KEY") or None,
+        )
+        return cls(api_key=os.environ.get("KITE_API_KEY"), access_token=token,
+                   instruments=instruments, underlyings=underlyings)
+
     # -- availability / client ------------------------------------------
     def available(self) -> bool:
         try:

@@ -6,24 +6,55 @@ This is how the platform uses it for all four jobs.
 ## 1. Install + credentials
 
 ```bash
-pip install kiteconnect
-export KITE_API_KEY="your_api_key"
-export KITE_ACCESS_TOKEN="todays_access_token"   # regenerated daily via login flow
+pip install kiteconnect pyotp cryptography requests
+cp .env.example .env          # then fill .env with YOUR values (never commit it)
 ```
 
-The access token is short-lived (one trading day) — regenerate it with Kite's
-login flow each morning before pre-open. Run from your whitelisted static IP
-(SEBI-2026).
+Fill these in `.env` (the daily access token is minted for you in step 2, so you
+don't set it by hand):
 
-## 2. Historical candles → research / backtesting
+```
+KITE_API_KEY=...           KITE_API_SECRET=...
+KITE_USER_ID=...           KITE_PASSWORD=...
+KITE_TOTP_SECRET=...       KITE_REDIRECT_URL=https://127.0.0.1
+TOKEN_STORE_PATH=.secrets/kite_token.json
+TOKEN_ENCRYPTION_KEY=      # python -c "from cryptography.fernet import Fernet;print(Fernet.generate_key().decode())"
+```
+
+Run everything from your whitelisted static IP (SEBI-2026).
+
+## 2. Mint today's access token (run each morning, before pre-open)
+
+The access token expires daily. This helper logs in with your env creds + TOTP,
+encrypts the token, and stores it at `TOKEN_STORE_PATH`:
+
+```bash
+set -a; source .env; set +a          # load your .env into the environment
+python -m dataplatform.kite_auth     # -> "Access token refreshed and stored ... "
+```
+
+Then build the adapter from the stored token (no token handling in your code):
+
+```python
+from dataplatform.vendors import KiteHistoricalAdapter
+kite = KiteHistoricalAdapter.from_token_store()
+kite.load_instruments(("NFO", "BFO"))
+```
+
+> The login flow uses Zerodha's web endpoints (which can change) — if the
+> token mint fails, fall back to Kite's standard browser login + paste the
+> `request_token`, then `save_token(...)`. Tip: automate the morning run with
+> cron once it works.
+
+## 3. Historical candles → research / backtesting
 
 ```python
 from dataplatform.vendors import KiteHistoricalAdapter
 from dataplatform.backfill import run_backfill
 import datetime as dt
 
-kite = KiteHistoricalAdapter()      # reads KITE_API_KEY / KITE_ACCESS_TOKEN
-kite.load_instruments(("NFO", "BFO"))   # pulls the active-contract master once
+kite = KiteHistoricalAdapter.from_token_store()   # uses today's stored token
+kite.load_instruments(("NFO", "BFO"))             # pulls the active-contract master once
 
 # canonical EOD chain for the active expiries, ingested into the lake + store:
 run_backfill(kite, dt.date(2026, 1, 1), dt.date.today())
@@ -41,7 +72,7 @@ instrument: `kite.historical_candles(token, start, end, "minute")`.
 > capture forward (below) or use a bulk vendor; the schema is identical so
 > nothing downstream changes.
 
-## 3. Live ticks → forward capture (history compounds)
+## 4. Live ticks → forward capture (history compounds)
 
 ```python
 kws = kite.ticker()                 # configured KiteTicker
@@ -49,7 +80,7 @@ kws = kite.ticker()                 # configured KiteTicker
 # layer, then kws.connect(). Each captured day becomes tomorrow's history.
 ```
 
-## 4. Orders & account
+## 5. Orders & account
 
 Read-only account state:
 
