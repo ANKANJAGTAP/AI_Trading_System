@@ -82,6 +82,18 @@ class KiteInstruments:
     def options_for(self, underlying, expiry) -> pd.DataFrame:
         return self._for(underlying, expiry, ["CE", "PE"])
 
+    def all_futures(self, underlying, asof) -> pd.DataFrame:
+        """All active futures (near/next/far) expiring on/after `asof`."""
+        d = self.df[(self.df["name"] == underlying)
+                    & (self.df["instrument_type"] == "FUT")].copy()
+        return d[d["expiry"].map(_to_date) >= asof]
+
+    def option_expiries(self, underlying, asof) -> list:
+        """Sorted option expiry dates on/after `asof` (nearest first)."""
+        d = self.df[(self.df["name"] == underlying)
+                    & (self.df["instrument_type"].isin(["CE", "PE"]))]
+        return sorted(e for e in {_to_date(x) for x in d["expiry"]} if e and e >= asof)
+
     def resolve_token(self, underlying, expiry, strike=None, opt_type="FUT"):
         row = self._match(underlying, expiry, strike, opt_type)
         return None if row is None else int(row["instrument_token"])
@@ -104,11 +116,12 @@ class KiteHistoricalAdapter(BarVendorAdapter):
 
     def __init__(self, api_key=None, access_token=None,
                  instruments: KiteInstruments | None = None,
-                 underlyings=("NIFTY", "FINNIFTY", "SENSEX")):
+                 underlyings=("NIFTY", "FINNIFTY", "SENSEX"), n_expiries: int = 3):
         super().__init__(underlyings)
         self.api_key = api_key or os.environ.get("KITE_API_KEY")
         self.access_token = access_token or os.environ.get("KITE_ACCESS_TOKEN")
         self.instruments = instruments
+        self.n_expiries = n_expiries        # option expiries (nearest first) to capture per day
         self._kite = None
 
     @classmethod
@@ -170,22 +183,25 @@ class KiteHistoricalAdapter(BarVendorAdapter):
 
     # -- canonical chain (front expiry on/after trade_date) -------------
     def _fetch_raw_chain(self, underlying: str, trade_date: dt.date) -> pd.DataFrame:
+        """Fetch all active FUTURES (near/next/far) + the nearest `n_expiries`
+        option chains. Longer-dated contracts carry more history, so this pulls
+        meaningfully more depth than just the front expiry."""
         if self.instruments is None:
             raise RuntimeError("Call load_instruments() (or pass instruments=) first.")
-        exps = [e for e in self.instruments.expiries(underlying) if e >= trade_date]
-        if not exps:
-            return pd.DataFrame()
-        front = min(exps)
         rows = []
-        for _, r in self.instruments.futures_for(underlying, front).iterrows():
+        # futures: every active monthly contract (near/next/far)
+        for _, r in self.instruments.all_futures(underlying, trade_date).iterrows():
             bar = self._bar(int(r["instrument_token"]), trade_date)
             if bar:
-                rows.append({"strike": 0.0, "opt_type": "", "expiry": front, **bar})
-        for _, r in self.instruments.options_for(underlying, front).iterrows():
-            bar = self._bar(int(r["instrument_token"]), trade_date)
-            if bar and bar.get("close") is not None:
-                rows.append({"strike": float(r["strike"]), "opt_type": r["instrument_type"],
-                             "expiry": front, **bar})
+                rows.append({"strike": 0.0, "opt_type": "",
+                             "expiry": _to_date(r["expiry"]), **bar})
+        # options: the nearest N expiries
+        for expiry in self.instruments.option_expiries(underlying, trade_date)[: self.n_expiries]:
+            for _, r in self.instruments.options_for(underlying, expiry).iterrows():
+                bar = self._bar(int(r["instrument_token"]), trade_date)
+                if bar and bar.get("close") is not None:
+                    rows.append({"strike": float(r["strike"]),
+                                 "opt_type": r["instrument_type"], "expiry": expiry, **bar})
         return pd.DataFrame(rows)
 
     # -- account (read-only) --------------------------------------------
