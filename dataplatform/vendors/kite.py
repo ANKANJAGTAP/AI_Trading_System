@@ -129,7 +129,7 @@ class KiteHistoricalAdapter(BarVendorAdapter):
             import kiteconnect  # noqa: F401
         except ImportError:
             return False
-        return bool(self.api_key and self.access_token and self.instruments is not None)
+        return bool(self.api_key and self.access_token)   # instruments loaded separately
 
     def _client(self):
         if self._kite is None:
@@ -151,12 +151,17 @@ class KiteHistoricalAdapter(BarVendorAdapter):
         return df.rename(columns={"date": "ts"}) if not df.empty else df
 
     def _bar(self, token: int, trade_date: dt.date) -> dict | None:
-        data = self._client().historical_data(
-            token,
-            dt.datetime.combine(trade_date, dt.time(9, 0)),
-            dt.datetime.combine(trade_date, dt.time(15, 40)),
-            "day", oi=True,
-        )
+        import time
+        time.sleep(0.34)                      # stay under Kite's ~3 req/s historical limit
+        try:
+            data = self._client().historical_data(
+                token,
+                dt.datetime.combine(trade_date, dt.time(9, 0)),
+                dt.datetime.combine(trade_date, dt.time(15, 40)),
+                "day", oi=True,
+            )
+        except Exception:
+            return None                       # skip a contract with no data / transient error
         if not data:
             return None
         b = data[-1]

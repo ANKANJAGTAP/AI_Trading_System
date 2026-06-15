@@ -118,6 +118,33 @@ def refresh_from_env() -> Path:
     return Path(path)
 
 
+def manual_refresh_from_env() -> Path:
+    """Reliable fallback: you log in via the browser; paste back the request_token.
+
+    No password/TOTP is handled here — you authenticate on Zerodha's own page.
+    """
+    from urllib.parse import urlparse, parse_qs
+    from kiteconnect import KiteConnect
+
+    kite = KiteConnect(api_key=os.environ["KITE_API_KEY"])
+    print("\n1) Open this URL in your browser and log in (Zerodha's own page):\n")
+    print("   " + kite.login_url() + "\n")
+    print("2) After login it redirects to your redirect URL (e.g. 127.0.0.1). The")
+    print("   page won't load — that's expected. Copy the FULL address from the")
+    print("   browser bar (it contains '...?request_token=XXXX&action=login...').\n")
+    raw = input("3) Paste the request_token (or the whole redirected URL) here: ").strip()
+    token = raw
+    if "request_token=" in raw:
+        token = parse_qs(urlparse(raw).query).get("request_token", [raw])[0]
+
+    data = kite.generate_session(token, api_secret=os.environ["KITE_API_SECRET"])
+    path = os.environ.get("TOKEN_STORE_PATH", ".secrets/kite_token.json")
+    save_token(data["access_token"], path, os.environ.get("TOKEN_ENCRYPTION_KEY") or None)
+    return Path(path)
+
+
 if __name__ == "__main__":
-    p = refresh_from_env()
-    print(f"Access token refreshed and stored (encrypted) at {p}")
+    import sys
+    fn = manual_refresh_from_env if "--manual" in sys.argv else refresh_from_env
+    p = fn()
+    print(f"\nAccess token stored at {p}")
