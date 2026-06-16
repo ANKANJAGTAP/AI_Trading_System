@@ -84,3 +84,21 @@ def test_no_rule_raises():
                                           False, None, THU)])
     with pytest.raises(ValueError):
         er.rule_on("SENSEX", dt.date(2026, 1, 1))
+
+
+def test_finnifty_monthly_tuesday_after_weekly_drop():
+    # Verified: FinNifty monthly = last TUESDAY both right after the 2024-11
+    # weekly drop and after the 2025-09 NSE swap (it never moved off Tuesday).
+    er = ExpiryResolver()
+    assert er.rule_on("FINNIFTY", dt.date(2025, 6, 1)).monthly_weekday == TUE
+    assert er.rule_on("FINNIFTY", dt.date(2026, 6, 1)).monthly_weekday == TUE
+
+
+def test_sensex_expiry_weekday_history():
+    # Verified BSE history: pre-2023 monthly Thu -> 2023-05 relaunch weekly Fri
+    # -> 2025-01 weekly Tue -> 2025-09 weekly Thu.
+    er = ExpiryResolver()
+    assert er.rule_on("SENSEX", dt.date(2022, 6, 1)).monthly_weekday == THU
+    assert er.rule_on("SENSEX", dt.date(2023, 6, 1)).weekly_weekday == FRI
+    assert er.rule_on("SENSEX", dt.date(2025, 3, 1)).weekly_weekday == TUE
+    assert er.rule_on("SENSEX", dt.date(2026, 6, 1)).weekly_weekday == THU

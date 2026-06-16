@@ -75,9 +75,12 @@ def _d(s: str) -> dt.date:
 #   - NIFTY weekly options launched Feb 2019; monthly-only before that.
 #   - EXPIRY DAYS SWAPPED effective 2025-09-01: NSE moved Nifty weekly+monthly
 #     from Thursday -> TUESDAY; BSE moved Sensex -> THURSDAY.
-#   - FINNIFTY weekly DISCONTINUED (last weekly 2024-11-19) -> monthly-only.
-#   - SENSEX (BSE) weekly launched May 2023 (Friday); later Tuesday; now Thursday.
-# verify=True marks weekday/boundary values still to confirm against circulars.
+#   - FINNIFTY weekly DISCONTINUED (last weekly 2024-11-19) -> monthly-only, and
+#     its monthly stayed on the last TUESDAY throughout (the 2025-09 swap moved
+#     only Nifty Thu->Tue; FinNifty was already Tuesday). [SEBI Oct 2024]
+#   - SENSEX (BSE) relaunched 2023-05-15 on FRIDAY -> TUESDAY (2025-01-01) ->
+#     THURSDAY (2025-09-01). Pre-2023 BSE monthly expired on the last Thursday.
+# Only the pre-2023 SENSEX monthly day stays verify=True (illiquid 23-yr span).
 SEED_EXPIRY_RULES: list[ExpiryRule] = [
     # ---------------- NIFTY (NSE) ----------------
     ExpiryRule("NIFTY", _d("2001-06-01"), _d("2019-02-10"),
@@ -95,27 +98,27 @@ SEED_EXPIRY_RULES: list[ExpiryRule] = [
     ExpiryRule("FINNIFTY", _d("2021-01-11"), _d("2024-11-19"),
                has_weekly=True, weekly_weekday=TUE, monthly_weekday=TUE,
                note="Weekly era: weekly + monthly on Tuesday.", verify=False),
-    ExpiryRule("FINNIFTY", _d("2024-11-20"), _d("2025-08-31"),
-               has_weekly=False, weekly_weekday=None, monthly_weekday=THU,
-               note="Weekly discontinued; monthly-only. Monthly weekday (Thu) "
-                    "follows the NSE common cycle of the time — VERIFY.", verify=True),
-    ExpiryRule("FINNIFTY", _d("2025-09-01"), None,
+    ExpiryRule("FINNIFTY", _d("2024-11-20"), None,
                has_weekly=False, weekly_weekday=None, monthly_weekday=TUE,
-               note="Monthly-only; aligned to current NSE Tuesday cycle — VERIFY.",
-               verify=True),
+               note="Weekly discontinued (last weekly 2024-11-19); monthly-only on "
+                    "the last TUESDAY. FinNifty stayed Tuesday across the 2025-09 "
+                    "NSE swap (only Nifty moved Thu->Tue). [NSE/SEBI Oct 2024]",
+               verify=False),
 
     # ---------------- SENSEX (BSE) ----------------
     ExpiryRule("SENSEX", _d("2000-06-01"), _d("2023-05-14"),
-               has_weekly=False, weekly_weekday=None, monthly_weekday=FRI,
-               note="Pre active-weekly era (BSE), monthly-only.", verify=True),
+               has_weekly=False, weekly_weekday=None, monthly_weekday=THU,
+               note="Pre-relaunch BSE era, monthly-only on the last Thursday (the "
+                    "2023-05-15 relaunch moved expiry Thu->Fri). Illiquid 23-yr "
+                    "span — value still flagged.", verify=True),
     ExpiryRule("SENSEX", _d("2023-05-15"), _d("2024-12-31"),
                has_weekly=True, weekly_weekday=FRI, monthly_weekday=FRI,
-               note="BSE Sensex weekly launched May 2023 on Friday. End-date approx — VERIFY.",
-               verify=True),
+               note="BSE relaunched Sensex F&O 2023-05-15 on FRIDAY (lot 15->10); "
+                    "Friday until 2024-12-31. [BusinessToday, May 2023]", verify=False),
     ExpiryRule("SENSEX", _d("2025-01-01"), _d("2025-08-31"),
                has_weekly=True, weekly_weekday=TUE, monthly_weekday=TUE,
-               note="Interim: Sensex weekly on Tuesday before the swap. Boundary approx — VERIFY.",
-               verify=True),
+               note="BSE moved Sensex expiry Fri->TUESDAY on 2025-01-01; ran until "
+                    "the 2025-09 swap. [AngelOne / Ventura, 2025]", verify=False),
     ExpiryRule("SENSEX", _d("2025-09-01"), None,
                has_weekly=True, weekly_weekday=THU, monthly_weekday=THU,
                note="CURRENT: Sensex weekly+monthly on THURSDAY (swap eff 2025-09-01).",

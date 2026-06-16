@@ -1,18 +1,21 @@
 """
 Seed effective-dated contract specs for NIFTY / FINNIFTY / SENSEX.
 
-NSE values below are VERIFIED against public circulars/reporting (verify=False):
+All values below are VERIFIED against public circulars/reporting (verify=False):
   * Nifty lot: 25 -> 75 effective 2024-11-20 (SEBI Rs15-20L min contract value;
-    existing contracts rolled by 2024-12-26), then 75 -> 65 effective 2024-12-31
-    (the final 75-lot contract expired 2024-12-30).  [NSE circular, Nov 2024 /
-    NSE lot revision Oct-Dec 2025]
+    existing 25-lot contracts rolled by 2024-12-26), then 75 -> 65 effective
+    2025-12-31 (revised lot applies from the Jan-2026 series; the final 75-lot
+    contract expired 2025-12-30).  [NSE circular Nov 2024 / NSE lot revision
+    Oct-Dec 2025, effective Jan-2026]
   * FinNifty lot: 40 (weekly era) -> 65 (2024-11-20) -> 60 (2025-12-31).
   * FinNifty WEEKLY options DISCONTINUED: last weekly expiry 2024-11-19
     (SEBI single-weekly-per-exchange; NSE kept only Nifty 50 weekly).
+  * SENSEX (BSE) lot: 15 at the 2000 launch -> 10 on the 2023-05-15 relaunch ->
+    20 on 2024-11-20 (BSE circular); unchanged through the Jan-2026 revision.
 
-SENSEX (BSE) lot values remain verify=True — confirm against BSE circulars.
-Sources: groww.in / 5paisa / zerodha bulletins (Nov 2024); lemonn / stocko
-(Oct-Dec 2025 lot revision); business-standard / newsonair (expiry swap 2025).
+Sources: businesstoday (May-2023 Sensex relaunch); groww / zerodha / 5paisa
+(BSE Nov-2024 lot 10->20); kotaksecurities / angelone (NSE Jan-2026 65/60
+revision); business-standard / newsonair (expiry swap 2025).
 """
 from __future__ import annotations
 
@@ -51,13 +54,13 @@ SEED_SPECS: list[SpecRecord] = [
     SpecRecord("FINNIFTY", "weekly_available", "false", _d("2024-11-20"), None,
                source="nse_weekly_discontinuation_nov2024", verify=False),
 
-    # ----------------------- SENSEX (BSE) — VERIFY -----------------------
-    # BSE relaunched Sensex weekly options May 2023. Lot sizes here are best
-    # estimates; CONFIRM against BSE circulars (verify=True).
+    # ----------------------- SENSEX (BSE) — VERIFIED -----------------------
+    # BSE relaunched Sensex F&O 2023-05-15 with lot 10 (cut from 15); raised to
+    # 20 on 2024-11-20 and unchanged through the Jan-2026 NSE revision.
     SpecRecord("SENSEX", "lot_size", "10", _d("2023-05-15"), _d("2024-11-19"),
-               source="seed", verify=True),
+               source="bse_sensex_relaunch_may2023", verify=False),
     SpecRecord("SENSEX", "lot_size", "20", _d("2024-11-20"), None,
-               source="seed", verify=True),
+               source="bse_circular_nov2024", verify=False),
     SpecRecord("SENSEX", "tick_size", "0.05", _d("2023-05-15"), None, verify=False),
     SpecRecord("SENSEX", "weekly_available", "true", _d("2023-05-15"), None,
                source="bse_sensex_weekly_launch_2023", verify=False),

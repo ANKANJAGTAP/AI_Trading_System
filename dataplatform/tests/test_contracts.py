@@ -3,6 +3,7 @@ import datetime as dt
 import pytest
 
 from dataplatform.contracts import ContractSpecResolver
+from dataplatform.contracts.models import SpecRecord
 
 
 def test_lot_size_point_in_time():
@@ -33,7 +34,11 @@ def test_missing_raises():
 
 
 def test_unverified_surface():
-    r = ContractSpecResolver()
-    unver = r.unverified()
-    assert len(unver) > 0
+    # The shipped seed is now fully verified against NSE/BSE circulars.
+    assert ContractSpecResolver().unverified() == []
+    # The surfacing mechanism still flags any verify=True record that's added.
+    flagged = SpecRecord("X", "lot_size", "1", dt.date(2020, 1, 1), None, verify=True)
+    ok = SpecRecord("Y", "lot_size", "1", dt.date(2020, 1, 1), None, verify=False)
+    unver = ContractSpecResolver(specs=[flagged, ok]).unverified()
+    assert unver == [flagged]
     assert all(s.verify for s in unver)
