@@ -36,14 +36,21 @@ async def create_bracket(executor, decision, fill, position_id: int, mode: str) 
 
     if mode == "live" and decision.stop_price and decision.target_price:
         exit_side = "SELL" if decision.side == "BUY" else "BUY"
-        lower, upper = sorted([decision.stop_price, decision.target_price])
+        stop_px, target_px = decision.stop_price, decision.target_price
+        lower, upper = sorted([stop_px, target_px])
+        # P0#7: the STOP leg is a MARKET order so it fills THROUGH a gap (a stop-LIMIT
+        # can be jumped and never fill); the target leg stays LIMIT. Configurable.
+        stop_order_type = (getattr(executor.config.execution, "oco_gtt", {}) or {}).get(
+            "stop_order_type", "MARKET")
 
         def leg(price: float) -> dict:
+            otype = stop_order_type if price == stop_px else "LIMIT"
             return {
                 "exchange": decision.instrument["exchange"],
                 "tradingsymbol": decision.instrument["tradingsymbol"],
                 "transaction_type": exit_side, "quantity": fill.quantity,
-                "order_type": "LIMIT", "product": decision.product, "price": price,
+                "order_type": otype, "product": decision.product,
+                "price": (0 if otype == "MARKET" else price),
             }
 
         try:
@@ -53,12 +60,14 @@ async def create_bracket(executor, decision, fill, position_id: int, mode: str) 
                 exchange=decision.instrument["exchange"], last_price=fill.price,
                 lower_trigger=lower, upper_trigger=upper, orders=[leg(lower), leg(upper)])
             bracket = {"type": "gtt_oco", "mode": "live", "gtt_id": gtt_id,
-                       "stop": decision.stop_price, "target": decision.target_price,
-                       "quantity": fill.quantity}
-            # Persist the gtt_id so close()/safe-exit can cancel the resting OCO
-            # instead of leaving it to re-fire into a new naked position.
+                       "stop": stop_px, "target": target_px, "quantity": fill.quantity,
+                       "stop_order_type": stop_order_type}
+            # Persist the gtt_id so close()/safe-exit can cancel the resting OCO, and
+            # register it so the reconciler can cancel it if it's ever orphaned.
             try:
                 await executor.book.attach_bracket(position_id, bracket)
+                await executor.book.record_bracket(position_id, decision.correlation_id, gtt_id,
+                                                   stop_order_type, lower, upper)
             except Exception as exc:
                 log.error("attach_bracket_failed", error=str(exc))
         except Exception as exc:

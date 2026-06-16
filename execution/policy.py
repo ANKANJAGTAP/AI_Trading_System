@@ -32,6 +32,21 @@ def close_books_fully(status: str, filled_qty: int, position_qty: int) -> bool:
     return status == "COMPLETE" and filled_qty >= position_qty
 
 
+# Bracket lifecycle states (P0#7).
+BRACKET_REQUESTED = "BRACKET_REQUESTED"
+BRACKET_ACTIVE = "BRACKET_ACTIVE"
+STOP_TRIGGERED = "STOP_TRIGGERED"
+TARGET_TRIGGERED = "TARGET_TRIGGERED"
+BRACKET_CANCELLED = "CANCELLED"
+BROKER_FILLED = "BROKER_FILLED"
+
+
+def duplicate_exit_risk(broker_net_qty: int) -> bool:
+    """P0#7: True if the broker shows the position already FLAT — a market exit now
+    would duplicate a bracket fill, so book from the existing fill instead."""
+    return int(broker_net_qty) == 0
+
+
 def live_structures_block_reason(mode: str, enabled: bool) -> str | None:
     """P0#6: live multi-leg F&O is not implemented for real orders. Sim is always
     allowed; live is blocked unless explicitly enabled, and even then fails closed

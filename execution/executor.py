@@ -22,7 +22,7 @@ from execution.costs import CostModel
 from execution.guards import GuardManager
 from execution.models import Decision, ExecutionResult, ExitReason, Fill, NormalizedFill, OrderOutcome
 from execution.order_lifecycle import UNSAFE_STATES, entry_outcome
-from execution.policy import (close_books_fully, exit_product_supported,
+from execution.policy import (close_books_fully, duplicate_exit_risk, exit_product_supported,
                               live_structures_block_reason, normalize_exit_status)
 from execution.position_book import PositionBook
 from execution.recovery import adopt_open_positions
@@ -298,32 +298,21 @@ class Executor:
         pos = dict(row)
         corr = pos.get("correlation_id")
         if self.mode == "live":
-            # P0#4: book from BROKER TRUTH — never fabricate a P&L from a quote.
             # Cancel the resting OCO FIRST so the broker can't fill it after our exit.
             await self._cancel_bracket(pos)
-            try:
-                nf = await self.market_exit(pos)
-            except Exception as exc:
-                await self.book.mark_close_pending(position_id, None, f"market_exit error: {exc}")
+            await self.book.set_bracket_state(position_id, "CANCELLED", "closed")
+            # P0#7: re-query the broker BEFORE a market exit. If the bracket already
+            # filled (broker shows the position flat), a market exit now would DUPLICATE
+            # it — park CLOSE_PENDING and let the reconcile book the real fill.
+            bq = await self._broker_net_qty(pos.get("instrument_token"))
+            if bq is not None and duplicate_exit_risk(bq):
+                await self.book.mark_close_pending(position_id, None, "broker already flat (bracket filled)")
                 await self.book.append_event(position_id, corr, "close_pending",
-                                             detail={"error": str(exc), "reason": reason})
-                log.error("market_exit_failed_close_pending", id=position_id, error=str(exc))
+                                             detail={"reason": reason, "duplicate_exit_guard": True})
+                log.warning("duplicate_exit_avoided", id=position_id)
                 realized = None
             else:
-                if close_books_fully(nf.status, nf.filled_qty, int(pos["quantity"])):
-                    realized = await self.book.close_position(position_id, nf.avg_price, nf.fees, reason)
-                    await self.book.append_event(position_id, corr, "full_close", nf, {"reason": reason})
-                else:
-                    await self.book.mark_close_pending(
-                        position_id, nf.broker_order_id,
-                        f"exit {nf.status} filled={nf.filled_qty}/{pos['quantity']}")
-                    await self.book.append_event(position_id, corr, "close_pending", nf, {"reason": reason})
-                    if self.alerter:
-                        await self.alerter.send_async(
-                            "Live exit needs reconcile",
-                            f"position {position_id} exit {nf.status} "
-                            f"filled {nf.filled_qty}/{pos['quantity']} — CLOSE_PENDING")
-                    realized = None
+                realized = await self._do_live_exit(position_id, pos, corr, reason)
         else:
             # sim (unchanged): local depth-aware exit price + full cost model.
             px = price or await self.exit_price(pos) or fallback_price or float(pos["average_price"])
@@ -348,6 +337,64 @@ class Executor:
                 await set_cooldown(f"eq:{tok}", cd)
         except Exception:
             pass
+
+    async def _do_live_exit(self, position_id: int, pos: dict, corr, reason: str) -> float | None:
+        """P0#4: place the exit, book from broker truth, or park CLOSE_PENDING."""
+        try:
+            nf = await self.market_exit(pos)
+        except Exception as exc:
+            await self.book.mark_close_pending(position_id, None, f"market_exit error: {exc}")
+            await self.book.append_event(position_id, corr, "close_pending",
+                                         detail={"error": str(exc), "reason": reason})
+            log.error("market_exit_failed_close_pending", id=position_id, error=str(exc))
+            return None
+        if close_books_fully(nf.status, nf.filled_qty, int(pos["quantity"])):
+            realized = await self.book.close_position(position_id, nf.avg_price, nf.fees, reason)
+            await self.book.append_event(position_id, corr, "full_close", nf, {"reason": reason})
+            return realized
+        await self.book.mark_close_pending(position_id, nf.broker_order_id,
+                                           f"exit {nf.status} filled={nf.filled_qty}/{pos['quantity']}")
+        await self.book.append_event(position_id, corr, "close_pending", nf, {"reason": reason})
+        if self.alerter:
+            await self.alerter.send_async(
+                "Live exit needs reconcile",
+                f"position {position_id} exit {nf.status} "
+                f"filled {nf.filled_qty}/{pos['quantity']} — CLOSE_PENDING")
+        return None
+
+    async def _broker_net_qty(self, token) -> int | None:
+        """P0#7: broker net signed qty for an instrument token (None if unavailable)."""
+        if token is None:
+            return None
+        try:
+            bp = await self.governor.call("other", self.adapter.positions)
+            net = bp.get("net", []) if isinstance(bp, dict) else []
+            for p in net:
+                if p.get("instrument_token") == token:
+                    return int(p.get("quantity") or 0)
+            return 0
+        except Exception as exc:
+            log.warning("broker_net_qty_failed", error=str(exc))
+            return None
+
+    async def reconcile_brackets(self) -> int:
+        """P0#7: cancel orphaned GTTs — a bracket still ACTIVE while its position is no
+        longer open means a resting OCO could re-fire into a new naked position."""
+        cancelled = 0
+        for b in await self.book.active_brackets():
+            pos = await fetchrow("SELECT status FROM positions WHERE id=$1", b["position_id"])
+            if pos and pos["status"] == "open":
+                continue
+            gtt = b.get("gtt_id")
+            if gtt:
+                try:
+                    await self.governor.call("order", self.adapter.delete_gtt, gtt)
+                    log.info("orphan_gtt_cancelled", gtt=gtt, position_id=b["position_id"])
+                except Exception as exc:
+                    log.warning("orphan_gtt_cancel_failed", gtt=gtt, error=str(exc))
+            await self.book.set_bracket_state(b["position_id"], "CANCELLED", "orphan_reconciled")
+            cancelled += 1
+        return cancelled
 
     async def on_price(self, position_id: int, price: float) -> ExecutionResult | None:
         """Fast-loop hook (Phase 5 drives this per tick): check guards, exit on a hit."""

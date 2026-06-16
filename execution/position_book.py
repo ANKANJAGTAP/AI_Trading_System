@@ -77,6 +77,27 @@ class PositionBook:
         await execute("UPDATE positions SET raw = COALESCE(raw,'{}'::jsonb) || $2::jsonb WHERE id=$1",
                       pid, json.dumps({"bracket": bracket}))
 
+    async def record_bracket(self, pid: int, correlation_id, gtt_id, stop_order_type: str,
+                             lower, upper, state: str = "BRACKET_ACTIVE") -> None:
+        """P0#7: register a live bracket so the reconciler can find/cancel orphans."""
+        try:
+            await execute(
+                "INSERT INTO brackets (position_id, correlation_id, gtt_id, state, "
+                "stop_order_type, lower_trigger, upper_trigger) VALUES ($1,$2,$3,$4,$5,$6,$7)",
+                pid, str(correlation_id) if correlation_id else None,
+                str(gtt_id) if gtt_id is not None else None, state, stop_order_type, lower, upper)
+        except Exception as exc:
+            log.warning("record_bracket_failed", error=str(exc))
+
+    async def set_bracket_state(self, pid: int, state: str, last_broker_status: str | None = None) -> None:
+        await execute(
+            "UPDATE brackets SET state=$2, last_broker_status=COALESCE($3,last_broker_status), "
+            "updated_at=now() WHERE position_id=$1", pid, state, last_broker_status)
+
+    async def active_brackets(self) -> list[dict]:
+        rows = await fetch("SELECT * FROM brackets WHERE state='BRACKET_ACTIVE'")
+        return [dict(r) for r in rows]
+
     async def persist_order_fill(self, decision, fill, mode: str, status: str,
                                  broker_order_id: str | None = None) -> int | None:
         """Append the order + fill rows (the §9 order/fill audit trail). Best-effort:

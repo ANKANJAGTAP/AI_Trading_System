@@ -71,3 +71,4 @@ freeze_quantity:
 oco_gtt:
   prefer_gtt: true           # use GTT/OCO brackets where supported
   bracket: true              # entry + stop + target
+  stop_order_type: MARKET    # P0#7: stop leg fills THROUGH gaps (vs a jumpable LIMIT)
