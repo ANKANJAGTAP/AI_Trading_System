@@ -699,6 +699,29 @@ async def _eod_summary(alerter) -> None:
         log.error("eod_summary_failed", error=str(exc))
 
 
+async def _dataplatform_ingest_job(cfg) -> None:
+    """Compound the F&O history forward (Pillar 1): pull the last few sessions
+    into the Parquet lake + the shared operational store (TimescaleDB when
+    TIMESCALE_DSN is set). Fully isolated from the trading path — the call is
+    best-effort and a failure only logs. Runs in a worker thread so the blocking
+    Kite/IO pull never stalls the event loop."""
+    try:
+        from dataplatform.ingestion.daily import run_daily_ingestion
+        dp = getattr(cfg.system, "dataplatform", {}) or {}
+        res = await asyncio.to_thread(
+            run_daily_ingestion,
+            int(dp.get("days_back", 3) or 3),
+            str(dp.get("source", "kite") or "kite"),
+        )
+        if res.get("error"):
+            log.warning("dataplatform_ingest_skipped", reason=res.get("error"), source=res.get("source"))
+        else:
+            log.info("dataplatform_ingest_ok", rows=res.get("rows"), days=res.get("days"),
+                     store=res.get("store_backend"))
+    except Exception as exc:
+        log.error("dataplatform_ingest_failed", error=str(exc))
+
+
 async def bootstrap():
     configure_logging()
     cfg = get_config()
@@ -801,6 +824,14 @@ async def bootstrap():
         log.info("paper_autorun_scheduled", enable="09:15", disable="15:30")
     scheduler.add_job(_eod_summary, CronTrigger(hour=15, minute=35, timezone=str(IST)),
                       args=[alerter], id="eod_summary", replace_existing=True)
+    # Data platform (Pillar 1): compound the curated F&O history forward each
+    # evening into the lake + shared TimescaleDB. Best-effort; off unless enabled.
+    dp_cfg = getattr(cfg.system, "dataplatform", {}) or {}
+    if dp_cfg.get("enabled"):
+        dh, dmn = str(dp_cfg.get("ingest_time", "18:45")).split(":")
+        scheduler.add_job(_dataplatform_ingest_job, CronTrigger(hour=int(dh), minute=int(dmn), timezone=str(IST)),
+                          args=[cfg], id="dataplatform_ingest", replace_existing=True)
+        log.info("dataplatform_ingest_scheduled", at=f"{dh}:{dmn}")
     # Nightly meta-labeler retrain (Tier 2 ML): trains on the audit trail, activates
     # only after passing OOS validation, then hot-reloads into the orchestrator.
     meta_cfg = getattr(cfg.system, "meta_label", {}) or {}
