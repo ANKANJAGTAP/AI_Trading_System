@@ -316,6 +316,7 @@ async def control_ks_reset(b: ConfirmBody):
     await set_state("engine_halted", False, "operator")
     await set_state("engine_paused", False, "operator")
     await set_state("dd_circuit_active", False, "operator")   # clear Phase 3.2 drawdown circuit
+    await set_state("block_new_entries", False, "operator")   # P0#5: clear unsafe-entry block
     await audit("control_ks_reset", "api", "kill-switch + circuits reset by operator")
     return {"ok": True}
 

@@ -15,12 +15,13 @@ from common.db import fetchrow
 from common.logging import get_logger
 from common.errors import UnsafeLiveState
 from common.market_time import now_ist
-from common.state import get_state
+from common.state import get_state, set_state
 from data.instruments import get_instrument
 from execution.brackets import create_bracket
 from execution.costs import CostModel
 from execution.guards import GuardManager
 from execution.models import Decision, ExecutionResult, ExitReason, Fill, NormalizedFill, OrderOutcome
+from execution.order_lifecycle import UNSAFE_STATES, entry_outcome
 from execution.policy import (close_books_fully, exit_product_supported,
                               live_structures_block_reason, normalize_exit_status)
 from execution.position_book import PositionBook
@@ -130,6 +131,9 @@ class Executor:
             return ExecutionResult(OrderOutcome.REJECTED, decision, reason="engine halted (fail-safe active)")
         if await get_state("kill_switch_active", False):
             return ExecutionResult(OrderOutcome.REJECTED, decision, reason="kill-switch active")
+        if await get_state("block_new_entries", False):   # P0#5: unprotected/reconcile pending
+            return ExecutionResult(OrderOutcome.REJECTED, decision,
+                                   reason="new entries blocked (unsafe live state — reconcile required)")
         if mode == "live":
             return await self._execute_live(decision)
         return await self._execute_sim(decision, force_fill_qty)
@@ -170,6 +174,7 @@ class Executor:
                                    reason=f"unsupported exchange/product for live: {exch}/{decision.product}")
         clips = self._slice(decision.quantity, self._freeze_limit(decision.instrument))
         filled, notional, order_ids = 0, 0.0, []
+        remainder_dealt_with = True   # P0#5: False if a clip leaves an unconfirmed remainder
         for clip in clips:
             try:
                 oid = await self.governor.call(
@@ -180,31 +185,86 @@ class Executor:
                     price=(decision.entry_price if decision.order_type == "LIMIT" else None))
                 order_ids.append(oid)
                 st = await self._poll_order(oid)
-                filled += st["filled"]
-                notional += st["filled"] * (st["avg_price"] or 0.0)  # quantity-weighted
+                cf = int(st["filled"])
+                filled += cf
+                notional += cf * (st["avg_price"] or 0.0)   # quantity-weighted
+                if st["status"] == "COMPLETE":
+                    continue
                 if st["status"] == "REJECTED" and not self._transient(st["reason"]):
                     log.error("order_rejected_no_retry", reason=st["reason"])
-                    break  # reason-aware: don't blindly retry margin/circuit/ban/freeze
+                    break   # clean reject: nothing resting
+                # P0#5: clip didn't complete (partial/timeout) -> cancel the resting
+                # remainder and CONFIRM it (never assume dead). Stop placing more clips.
+                if cf < clip:
+                    confirmed = await self._cancel_and_confirm(oid)
+                    remainder_dealt_with = remainder_dealt_with and confirmed
+                break
             except Exception as exc:
                 log.error("place_order_error", error=str(exc))
+                remainder_dealt_with = False   # unknown broker state for the order just sent
                 break
+
+        # P0#5: bracket only the CONFIRMED filled qty; classify the terminal state.
+        avg_price, fees, pid, bracket = 0.0, {"total": 0.0}, None, None
+        if filled > 0:
+            avg_price = round(notional / filled, 2)
+            seg = self.cost.segment_key(decision.sleeve, decision.instrument.get("instrument_type"))
+            fees = self.cost.compute_leg(seg, decision.side, filled, avg_price)
+            fill = Fill(quantity=filled, price=avg_price, fees=fees, ts=now_ist())
+            pid = await self.book.open_position(decision, fill, "live")
+            outcome = OrderOutcome.PARTIAL if filled < decision.quantity else OrderOutcome.FILLED
+            await self.book.persist_order_fill(decision, fill, "live", outcome,
+                                               broker_order_id=order_ids[0] if order_ids else None)
+            try:
+                bracket = await create_bracket(self, decision, fill, pid, "live")   # sized to filled
+            except Exception as exc:
+                log.error("bracket_failed", id=pid, error=str(exc))
+                bracket = None
+
+        state = entry_outcome(filled, decision.quantity, remainder_dealt_with, bracket is not None)
+        if state in UNSAFE_STATES:
+            await self._flag_unsafe_entry(decision, pid, state, order_ids)
+
         if filled == 0:
-            return ExecutionResult(OrderOutcome.REJECTED, decision,
-                                   reason="no fill (rejected/failed); remainder cancelled",
-                                   broker_order_id=order_ids[0] if order_ids else None)
-        # Quantity-weighted average fill across all clips (not just the last clip).
-        avg_price = round(notional / filled, 2) if filled else 0.0
-        seg = self.cost.segment_key(decision.sleeve, decision.instrument.get("instrument_type"))
-        fees = self.cost.compute_leg(seg, decision.side, filled, avg_price)
-        fill = Fill(quantity=filled, price=avg_price, fees=fees, ts=now_ist())
-        pid = await self.book.open_position(decision, fill, "live")
-        outcome = OrderOutcome.PARTIAL if filled < decision.quantity else OrderOutcome.FILLED
-        await self.book.persist_order_fill(decision, fill, "live", outcome,
-                                           broker_order_id=order_ids[0] if order_ids else None)
-        bracket = await create_bracket(self, decision, fill, pid, "live")  # sized to `filled`
-        return ExecutionResult(outcome, decision, filled_quantity=filled, avg_price=avg_price,
-                               fees_total=fees["total"], position_id=pid, bracket=bracket,
-                               broker_order_id=order_ids[0] if order_ids else None)
+            return ExecutionResult(OrderOutcome.REJECTED, decision, reason=f"no fill ({state})",
+                                   broker_order_id=order_ids[0] if order_ids else None,
+                                   detail={"lifecycle_state": state})
+        return ExecutionResult(
+            OrderOutcome.PARTIAL if filled < decision.quantity else OrderOutcome.FILLED,
+            decision, filled_quantity=filled, avg_price=avg_price, fees_total=fees["total"],
+            position_id=pid, bracket=bracket, broker_order_id=order_ids[0] if order_ids else None,
+            detail={"lifecycle_state": state})
+
+    async def _cancel_and_confirm(self, order_id: str, attempts: int = 8, delay: float = 0.5) -> bool:
+        """P0#5: cancel a resting order and CONFIRM it's dead. True only if the broker
+        confirms CANCELLED/REJECTED/COMPLETE; False (=> reconcile) if unconfirmed."""
+        try:
+            await self.governor.call("order", self.adapter.cancel_order, order_id)
+        except Exception as exc:
+            log.error("cancel_order_error", order_id=order_id, error=str(exc))
+        for _ in range(attempts):
+            try:
+                hist = await self.governor.call("other", self.adapter.order_history, order_id)
+                status = (hist[-1].get("status") if hist else "") or ""
+                if status in ("CANCELLED", "REJECTED", "COMPLETE"):
+                    return True
+            except Exception as exc:
+                log.warning("cancel_confirm_poll_error", order_id=order_id, error=str(exc))
+            await asyncio.sleep(delay)
+        return False
+
+    async def _flag_unsafe_entry(self, decision, pid, state, order_ids) -> None:
+        """P0#5: unprotected live exposure or an unconfirmed remainder -> block new
+        entries until an operator reconciles, and alert."""
+        await set_state("block_new_entries", True, "risk")
+        msg = (f"UNSAFE ENTRY ({state}): {decision.instrument.get('tradingsymbol')} "
+               f"pid={pid} orders={order_ids}. New entries blocked until reconciled.")
+        log.error("unsafe_entry_block_new_entries", state=state, pid=pid, orders=order_ids)
+        if self.alerter:
+            try:
+                await self.alerter.send_async("Unsafe live entry — new entries blocked", msg)
+            except Exception:
+                pass
 
     # --- exit / guard-driven close --------------------------------------
     async def _cancel_bracket(self, pos: dict) -> None:
