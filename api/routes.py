@@ -9,6 +9,7 @@ from pydantic import BaseModel
 
 from api import analytics as analytics_svc
 from api import backtest as backtest_svc
+from api import fno_lake as fno_lake_svc
 from api import marketdata, research as research_svc, services
 from common.audit import audit
 from common.commands import enqueue_command
@@ -165,6 +166,35 @@ async def post_research_train(b: TrainBody):
 @router.post("/research/activate/{model_id}")
 async def post_research_activate(model_id: int):
     return await research_svc.activate_model(model_id)
+
+
+# ----------------------------------------- F&O research on the curated lake (Pillars 1-5)
+# Read-only views over the dataplatform Parquet lake — point-in-time option analytics and
+# feature matrices the live tick screen can't show. Never touches the trading/broker path.
+@router.get("/fno/lake")
+async def get_fno_lake(start: str = "2026-01-01", end: str | None = None):
+    return await fno_lake_svc.lake_summary(start=start, end=end)
+
+
+@router.get("/fno/analytics")
+async def get_fno_analytics(underlying: str = "NIFTY", start: str = "2026-01-01",
+                            end: str | None = None, tail: int = Query(30, le=250)):
+    return await fno_lake_svc.analytics(underlying=underlying, start=start, end=end, tail=tail)
+
+
+@router.get("/fno/features")
+async def get_fno_features(underlying: str = "NIFTY", start: str = "2026-01-01",
+                           end: str | None = None, tail: int = Query(30, le=250)):
+    return await fno_lake_svc.features(underlying=underlying, start=start, end=end, tail=tail)
+
+
+@router.get("/fno/backtest")
+async def get_fno_backtest(underlying: str = "NIFTY", start: str = "2026-01-01",
+                           end: str | None = None,
+                           capital: float = Query(1_000_000.0, gt=0),
+                           per_trade_pct: float = Query(1.0, gt=0, le=10)):
+    return await fno_lake_svc.backtest(underlying=underlying, start=start, end=end,
+                                       capital=capital, per_trade_pct=per_trade_pct)
 
 
 @router.get("/signals/rejections")
