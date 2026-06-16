@@ -78,9 +78,11 @@ def _build_trading_stack(cfg, settings, adapter, md_service, alerter):
     paper = float(getattr(cfg.risk, "paper_capital", 0) or 0)
     pt = float(getattr(cfg.risk, "paper_per_trade_pct", 0) or 0) if paper > 0 else 0
     dl = float(getattr(cfg.risk, "paper_daily_max_loss_pct", 0) or 0) if paper > 0 else 0
+    from common.runtime_mode import get_runtime_mode
     capital_reader = CapitalReader(adapter, md_service.governor,
                                    static_capital=(paper if paper > 0 else None),
-                                   compound=bool(getattr(cfg.risk, "paper_compound", False)))
+                                   compound=bool(getattr(cfg.risk, "paper_compound", False)),
+                                   mode_provider=get_runtime_mode)   # P0#1: live -> broker capital
     kill_switch = KillSwitch(cfg, cfg.execution.mode, alerter, daily_loss_pct=(dl or None))
     risk = RiskEngine(
         cfg, capital_reader=capital_reader, kill_switch=kill_switch,

@@ -15,11 +15,15 @@ log = get_logger("capital")
 
 class CapitalReader:
     def __init__(self, adapter=None, governor=None, static_capital: float | None = None,
-                 compound: bool = False) -> None:
+                 compound: bool = False, mode_provider=None) -> None:
         self.adapter = adapter
         self.governor = governor
         self.static_capital = static_capital
         self.compound = compound
+        # P0#1: async () -> RuntimeModeState. When the active mode says
+        # capital_source == broker_live, the paper static is ignored and capital is
+        # read live from broker margins — so a flip to live can't size on paper money.
+        self.mode_provider = mode_provider
         self._cache: float | None = None
 
     @staticmethod
@@ -35,7 +39,15 @@ class CapitalReader:
             return 0.0
 
     async def get_capital(self, refresh: bool = False) -> float:
-        if self.static_capital is not None:
+        use_static = self.static_capital is not None
+        if use_static and self.mode_provider is not None:
+            try:
+                state = await self.mode_provider()
+                if getattr(state, "use_broker_capital", False):
+                    use_static = False        # live: read broker margins, not paper static
+            except Exception as exc:
+                log.warning("capital_mode_check_failed_using_static", error=str(exc))
+        if use_static:
             base = float(self.static_capital)
             if not self.compound:
                 return base

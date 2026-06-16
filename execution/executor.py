@@ -47,7 +47,12 @@ class Executor:
 
     # --- helpers ---------------------------------------------------------
     async def current_mode(self) -> str:
-        self.mode = await get_state("execution_mode", self.config.execution.mode)
+        # P0#1: single source of truth (RuntimeModeState); legacy key as fallback.
+        try:
+            from common.runtime_mode import load_runtime_mode
+            self.mode = (await load_runtime_mode()).mode
+        except Exception:
+            self.mode = await get_state("execution_mode", self.config.execution.mode)
         return self.mode
 
     def square_off_time(self, sleeve: str) -> str | None:
@@ -198,6 +203,7 @@ class Executor:
         tick from the fast-loop guards) -> spread-crossed live quote with slippage ->
         `fallback_price` (e.g. the structure's last mark) -> entry price as last resort
         (a forced exit must never be left open for lack of a quote)."""
+        await self.current_mode()   # P0#1: refresh mode (guard-driven exits skip execute())
         row = await fetchrow("SELECT * FROM positions WHERE id=$1", position_id)
         if not row or row["status"] != "open":
             return None

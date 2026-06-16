@@ -272,20 +272,36 @@ async def control_sleeve(sleeve: str, b: SleeveBody):
 
 @router.post("/controls/mode")
 async def control_mode(b: ModeBody):
-    if b.mode not in ("simulated_fill", "live"):
-        raise HTTPException(400, "mode must be simulated_fill or live")
-    if b.mode == "live":
-        if b.confirm_token != "LIVE":
-            raise HTTPException(400, "going LIVE requires confirm_token='LIVE'")
-        # Enforce the pre-live checklist SERVER-SIDE (the UI gate is not trusted).
-        checklist = await services.prelive_checklist()
-        missing = [k for k, v in checklist.items() if not v]
-        if missing:
-            raise HTTPException(400, f"pre-live checklist incomplete: {', '.join(missing)}")
-    await set_state("execution_mode", b.mode, "operator")
-    await audit("control_mode", "api", f"mode -> {b.mode}", payload={"mode": b.mode})
-    await publish_event("mode_changed", {"mode": b.mode})
-    return {"ok": True, "mode": b.mode}
+    # P0#1: all validation + the atomic write live in the transition service. Going
+    # live is fail-closed (confirm token + inactive kill-switch + pre-live all-pass);
+    # live->paper requires open live positions to be flat first.
+    from common.db import fetchval
+    from common.errors import ModeTransitionRejected
+    from common.mode_transition import request_transition
+    from common.state import get_state as _get_state
+
+    async def _ks_active() -> bool:
+        return bool(await _get_state("kill_switch_active", False))
+
+    async def _open_live() -> int:
+        return int(await fetchval(
+            "SELECT COUNT(*) FROM positions WHERE status='open' AND mode='live'") or 0)
+
+    try:
+        new = await request_transition(
+            b.mode, "operator",
+            confirm_token=b.confirm_token,
+            prelive_runner=services.prelive_checklist,
+            kill_switch_active=_ks_active,
+            open_live_positions=_open_live,
+            allow_unflattened_downgrade=bool(getattr(b, "allow_unflattened_downgrade", False)),
+        )
+    except ModeTransitionRejected as exc:
+        raise HTTPException(400, "; ".join(exc.reasons))
+    await audit("control_mode", "api", f"mode -> {new.mode}",
+                payload={"mode": new.mode, "version": new.version})
+    await publish_event("mode_changed", {"mode": new.mode})
+    return {"ok": True, "mode": new.mode, "version": new.version}
 
 
 @router.post("/controls/killswitch/reset")
