@@ -8,6 +8,8 @@ import { Backtest } from "@/screens/Backtest";
 import { Charts } from "@/screens/Charts";
 import { CommandCenter } from "@/screens/CommandCenter";
 import { Controls } from "@/screens/Controls";
+import { FnoResearch } from "@/screens/FnoResearch";
+import { PreLiveReadiness } from "@/screens/PreLiveReadiness";
 import { Market } from "@/screens/Market";
 import { OptionChain } from "@/screens/OptionChain";
 import { Positions } from "@/screens/Positions";
@@ -28,6 +30,8 @@ export const SCREENS: Record<string, ComponentType> = {
   risk: Risk,
   analytics: Analytics,
   backtest: Backtest,
+  "fno-research": FnoResearch,
+  prelive: PreLiveReadiness,
   audit: Audit,
   controls: Controls,
   settings: Settings,

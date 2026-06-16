@@ -18,6 +18,8 @@ import { Backtest } from "@/screens/Backtest";
 import { Charts } from "@/screens/Charts";
 import { CommandCenter } from "@/screens/CommandCenter";
 import { Controls } from "@/screens/Controls";
+import { FnoResearch } from "@/screens/FnoResearch";
+import { PreLiveReadiness } from "@/screens/PreLiveReadiness";
 import { Market } from "@/screens/Market";
 import { OptionChain } from "@/screens/OptionChain";
 import { Positions } from "@/screens/Positions";
@@ -112,6 +114,8 @@ export default function App() {
           <Route path="risk" element={<Risk />} />
           <Route path="analytics" element={<Analytics />} />
           <Route path="backtest" element={<Backtest />} />
+          <Route path="fno-research" element={<FnoResearch />} />
+          <Route path="prelive" element={<PreLiveReadiness />} />
           <Route path="audit" element={<Audit />} />
           <Route path="controls" element={<Controls />} />
           <Route path="settings" element={<Settings />} />

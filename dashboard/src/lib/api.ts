@@ -71,6 +71,14 @@ export const api = {
   researchDiscrimination: () => get<any>("/research/discrimination"),
   trainMeta: (body?: { name?: string; min_samples?: number }) => req<any>("POST", "/research/train", body ?? {}),
   prelive: () => get<any>("/prelive-checklist"),
+  // F&O research on the curated lake (Pillars 1-5)
+  fnoLake: (start = "2026-01-01") => get<any>(`/fno/lake?start=${start}`),
+  fnoAnalytics: (u: string, start = "2026-01-01") =>
+    get<any>(`/fno/analytics?underlying=${encodeURIComponent(u)}&start=${start}`),
+  fnoFeatures: (u: string, start = "2026-01-01") =>
+    get<any>(`/fno/features?underlying=${encodeURIComponent(u)}&start=${start}`),
+  fnoBacktest: (u: string, start = "2026-01-01") =>
+    get<any>(`/fno/backtest?underlying=${encodeURIComponent(u)}&start=${start}`),
   layouts: () => get<any[]>("/layouts"),
 
   // actions — all UI-guarded
