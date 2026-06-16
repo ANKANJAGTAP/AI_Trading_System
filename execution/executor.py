@@ -13,6 +13,7 @@ import time
 
 from common.db import fetchrow
 from common.logging import get_logger
+from common.errors import UnsafeLiveState
 from common.market_time import now_ist
 from common.state import get_state
 from data.instruments import get_instrument
@@ -20,7 +21,7 @@ from execution.brackets import create_bracket
 from execution.costs import CostModel
 from execution.guards import GuardManager
 from execution.models import Decision, ExecutionResult, ExitReason, Fill, OrderOutcome
-from execution.policy import live_structures_block_reason
+from execution.policy import exit_product_supported, live_structures_block_reason
 from execution.position_book import PositionBook
 from execution.recovery import adopt_open_positions
 from execution.simulator import FillSimulator
@@ -96,12 +97,21 @@ class Executor:
             side, int(position["quantity"]))
 
     async def market_exit(self, position: dict):
+        # P0#3: derive the exit order from the POSITION (product/exchange persisted
+        # at entry), never hardcode MIS. Unsupported/missing => fail closed (no order).
         inst = await get_instrument(position["instrument_token"]) or {}
         side = "SELL" if position["side"] == "BUY" else "BUY"
+        product = position.get("product")
+        exchange = position.get("exchange") or inst.get("exchange")
+        variety = position.get("variety") or "regular"
+        if not exit_product_supported(exchange, product):
+            raise UnsafeLiveState(
+                f"cannot exit {position.get('tradingsymbol')}: unsupported exchange/product "
+                f"{exchange}/{product}")
         return await self.governor.call(
-            "order", self.adapter.place_order, variety="regular", exchange=inst.get("exchange"),
+            "order", self.adapter.place_order, variety=variety, exchange=exchange,
             tradingsymbol=position["tradingsymbol"], transaction_type=side,
-            quantity=int(position["quantity"]), product="MIS", order_type="MARKET")
+            quantity=int(position["quantity"]), product=product, order_type="MARKET")
 
     # --- entry -----------------------------------------------------------
     async def execute(self, decision: Decision, force_fill_qty: int | None = None) -> ExecutionResult:
@@ -141,6 +151,13 @@ class Executor:
                 "avg_price": float(last.get("average_price") or 0), "reason": "poll timeout"}
 
     async def _execute_live(self, decision: Decision) -> ExecutionResult:
+        # P0#3: never open what we can't exit — reject unsupported exchange/product
+        # BEFORE sending any broker order.
+        exch = decision.instrument.get("exchange")
+        if not exit_product_supported(exch, decision.product):
+            log.error("entry_unsupported_product", exchange=exch, product=decision.product)
+            return ExecutionResult(OrderOutcome.REJECTED, decision,
+                                   reason=f"unsupported exchange/product for live: {exch}/{decision.product}")
         clips = self._slice(decision.quantity, self._freeze_limit(decision.instrument))
         filled, notional, order_ids = 0, 0.0, []
         for clip in clips:

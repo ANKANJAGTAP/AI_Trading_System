@@ -18,14 +18,20 @@ class PositionBook:
         self.alerter = alerter
 
     async def open_position(self, decision, fill, mode: str) -> int:
+        # P0#3: persist product/exchange/variety/order_type/instrument_type so the
+        # exit can derive the correct order fields (no hardcoded MIS at close).
+        inst = decision.instrument or {}
         row = await fetchrow(
             "INSERT INTO positions (correlation_id, mode, sleeve, instrument_token, tradingsymbol, "
-            "side, quantity, average_price, entry_price, stop_price, target_price, r_rupees, status, raw) "
-            "VALUES ($1::uuid,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'open',$13::jsonb) RETURNING id",
+            "side, quantity, average_price, entry_price, stop_price, target_price, r_rupees, "
+            "product, exchange, variety, order_type, instrument_type, status, raw) "
+            "VALUES ($1::uuid,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,'open',$18::jsonb) RETURNING id",
             decision.correlation_id, mode, decision.sleeve,
-            decision.instrument.get("instrument_token"), decision.instrument.get("tradingsymbol"),
+            inst.get("instrument_token"), inst.get("tradingsymbol"),
             decision.side, fill.quantity, fill.price, fill.price,
             decision.stop_price, decision.target_price, decision.r_rupees,
+            decision.product, inst.get("exchange"), getattr(decision, "variety", "regular") or "regular",
+            decision.order_type, inst.get("instrument_type"),
             json.dumps({"entry_fees": fill.fees}),
         )
         pid = row["id"]
@@ -57,10 +63,12 @@ class PositionBook:
             return existing["id"]
         row = await fetchrow(
             "INSERT INTO positions (correlation_id, mode, sleeve, instrument_token, tradingsymbol, "
-            "side, quantity, average_price, entry_price, stop_price, target_price, status, raw) "
-            "VALUES (gen_random_uuid(),$1,'adopted',$2,$3,$4,$5,$6,$6,$7,$8,$9,$10::jsonb) RETURNING id",
-            mode, tok, broker_pos.get("tradingsymbol"), side, qty, entry, stop, target, status,
-            json.dumps({"adopted": True}))
+            "side, quantity, average_price, entry_price, stop_price, target_price, "
+            "product, exchange, instrument_type, status, raw) "
+            "VALUES (gen_random_uuid(),$1,'adopted',$2,$3,$4,$5,$6,$6,$7,$8,$9,$10,$11,$12,$13::jsonb) RETURNING id",
+            mode, tok, broker_pos.get("tradingsymbol"), side, qty, entry, stop, target,
+            broker_pos.get("product"), broker_pos.get("exchange"), broker_pos.get("instrument_type"),
+            status, json.dumps({"adopted": True}))
         return row["id"]
 
     async def attach_bracket(self, pid: int, bracket: dict) -> None:
