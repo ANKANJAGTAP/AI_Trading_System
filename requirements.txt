@@ -14,6 +14,9 @@ requests>=2.31,<3
 # --- Data / DB / cache ---
 asyncpg>=0.29
 redis>=5.0
+psycopg2-binary>=2.9      # dataplatform OperationalStore -> TimescaleDB writes
+pyarrow>=15.0             # dataplatform Parquet lake (read/write)
+duckdb>=0.10              # dataplatform lake queries (features/backtest research API)
 
 # --- API / async ---
 fastapi>=0.110
