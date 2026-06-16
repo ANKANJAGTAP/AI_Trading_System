@@ -40,17 +40,52 @@ class FeatureEngine:
 # --------------------------------------------------------------------------- #
 # building inputs from canonical EOD F&O data
 # --------------------------------------------------------------------------- #
+_OHLCV = ["open", "high", "low", "close", "volume", "oi"]
+
+
 def underlying_daily_from_eod(eod: pd.DataFrame, underlying: str) -> pd.DataFrame:
-    """Daily OHLCV for an underlying built from its FRONT-month future."""
+    """Daily OHLCV for an underlying from its FRONT-month future; if no futures
+    are present, fall back to a put-call-parity spot from the option chain."""
     fut = eod[(eod["underlying"] == underlying) & (eod["instrument"] == "FUT")].copy()
     if fut.empty:
-        return pd.DataFrame(columns=["open", "high", "low", "close", "volume", "oi"])
+        return _daily_from_options(eod, underlying)
     fut["trade_date"] = pd.to_datetime(fut["trade_date"])
     fut["expiry"] = pd.to_datetime(fut["expiry"])
     fut = fut[fut["expiry"] >= fut["trade_date"]]
+    if fut.empty:
+        return _daily_from_options(eod, underlying)
     front_idx = fut.groupby("trade_date")["expiry"].idxmin()
     front = fut.loc[front_idx].sort_values("trade_date").set_index("trade_date")
-    return front[["open", "high", "low", "close", "volume", "oi"]]
+    return front[_OHLCV]
+
+
+def _daily_from_options(eod: pd.DataFrame, underlying: str) -> pd.DataFrame:
+    """Derive a daily underlying close via put-call parity (F ~= K_atm + C - P at
+    the ATM strike of the front expiry) when no futures are available."""
+    opt = eod[(eod["underlying"] == underlying) & (eod["instrument"] == "OPT")].copy()
+    if opt.empty:
+        return pd.DataFrame(columns=_OHLCV)
+    opt["trade_date"] = pd.to_datetime(opt["trade_date"])
+    opt["expiry"] = pd.to_datetime(opt["expiry"])
+    rows = []
+    for date, g in opt.groupby("trade_date"):
+        future = g[g["expiry"] >= date]
+        if future.empty:
+            continue
+        chain = g[g["expiry"] == future["expiry"].min()]
+        ce = chain[chain["opt_type"] == "CE"].set_index("strike")["close"]
+        pe = chain[chain["opt_type"] == "PE"].set_index("strike")["close"]
+        common = ce.index.intersection(pe.index)
+        if len(common) == 0:
+            continue
+        atm = (ce[common] - pe[common]).abs().idxmin()
+        spot = float(atm + ce[atm] - pe[atm])             # put-call parity forward
+        rows.append({"trade_date": date, "open": spot, "high": spot, "low": spot,
+                     "close": spot, "volume": int(chain["volume"].sum()),
+                     "oi": int(chain["oi"].sum())})
+    if not rows:
+        return pd.DataFrame(columns=_OHLCV)
+    return pd.DataFrame(rows).set_index("trade_date").sort_index()[_OHLCV]
 
 
 def option_features_timeseries(eod: pd.DataFrame, underlying: str,
