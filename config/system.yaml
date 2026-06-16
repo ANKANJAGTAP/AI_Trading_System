@@ -87,6 +87,12 @@ compliance:
   market_protection_pct: 1.0   # market/SL-M order protection % (Kite rejects 0)
   exchange_registered: false   # true only if the strategy is exchange-registered (>10 OPS)
 
+# Daily health digest — a morning snapshot email (mode, kill-switch, feed, lake
+# growth, open positions, day P&L, go-live readiness).
+health_digest:
+  enabled: true
+  time: "08:30"        # IST, pre-market
+
 # Email alerts (SMTP). Events that must notify the operator (spec §9).
 alerts:
   email_enabled: true

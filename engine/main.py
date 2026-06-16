@@ -731,6 +731,17 @@ async def _dataplatform_ingest_job(cfg) -> None:
         log.error("dataplatform_ingest_failed", error=str(exc))
 
 
+async def _health_digest_job(alerter) -> None:
+    """Email a morning health snapshot (mode/kill-switch/feed/lake/positions/P&L/
+    go-live readiness) so the live system can be monitored without logging in."""
+    try:
+        from research.health_digest import save_and_send
+        await save_and_send(alerter)
+        log.info("health_digest_sent")
+    except Exception as exc:
+        log.error("health_digest_failed", error=str(exc))
+
+
 async def bootstrap():
     configure_logging()
     cfg = get_config()
@@ -856,6 +867,13 @@ async def bootstrap():
     # funnel, learning status -> daily_journal table + email. Review fuel.
     scheduler.add_job(_journal_job, CronTrigger(hour=17, minute=0, timezone=str(IST)),
                       args=[alerter], id="daily_journal", replace_existing=True)
+    # Daily health digest — a morning snapshot email of the live system.
+    hd = getattr(cfg.system, "health_digest", {}) or {}
+    if hd.get("enabled", True):
+        hh, mm = str(hd.get("time", "08:30")).split(":")
+        scheduler.add_job(_health_digest_job, CronTrigger(hour=int(hh), minute=int(mm), timezone=str(IST)),
+                          args=[alerter], id="health_digest", replace_existing=True)
+        log.info("health_digest_scheduled", at=f"{hh}:{mm}")
     scheduler.start()
     log.info("engine_started", mode=cfg.execution.mode)
     return adapter, scheduler, md_service
