@@ -275,6 +275,7 @@ async def control_mode(b: ModeBody):
     # P0#1: all validation + the atomic write live in the transition service. Going
     # live is fail-closed (confirm token + inactive kill-switch + pre-live all-pass);
     # live->paper requires open live positions to be flat first.
+    from api.prelive_checks import build_prelive_service
     from common.db import fetchval
     from common.errors import ModeTransitionRejected
     from common.mode_transition import request_transition
@@ -287,11 +288,14 @@ async def control_mode(b: ModeBody):
         return int(await fetchval(
             "SELECT COUNT(*) FROM positions WHERE status='open' AND mode='live'") or 0)
 
+    async def _prelive_runner():           # persist the run on an actual go-live attempt
+        return await build_prelive_service(persist=True).run_all("operator")
+
     try:
         new = await request_transition(
             b.mode, "operator",
             confirm_token=b.confirm_token,
-            prelive_runner=services.prelive_checklist,
+            prelive_runner=_prelive_runner,
             kill_switch_active=_ks_active,
             open_live_positions=_open_live,
             allow_unflattened_downgrade=bool(getattr(b, "allow_unflattened_downgrade", False)),

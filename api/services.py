@@ -488,8 +488,11 @@ async def health() -> dict:
 
 
 async def prelive_checklist() -> dict:
-    keys = ["compliance_tagging", "failsafe_rehearsed", "reconcile_clean", "alerts_confirmed"]
-    return {k: bool(await get_state(f"prelive_{k}", False)) for k in keys}
+    """Real pre-live checks (P0#2): broker/feed/reconcile/redis/caps/calendar/etc.,
+    each with evidence. Read-only; NOT persisted here (dashboard polls this), so the
+    run is recorded only on an actual go-live attempt."""
+    from api.prelive_checks import build_prelive_service
+    return await build_prelive_service(persist=False).run_all()
 
 
 async def layouts_get() -> list[dict]:
