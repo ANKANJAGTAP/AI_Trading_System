@@ -20,8 +20,9 @@ from data.instruments import get_instrument
 from execution.brackets import create_bracket
 from execution.costs import CostModel
 from execution.guards import GuardManager
-from execution.models import Decision, ExecutionResult, ExitReason, Fill, OrderOutcome
-from execution.policy import exit_product_supported, live_structures_block_reason
+from execution.models import Decision, ExecutionResult, ExitReason, Fill, NormalizedFill, OrderOutcome
+from execution.policy import (close_books_fully, exit_product_supported,
+                              live_structures_block_reason, normalize_exit_status)
 from execution.position_book import PositionBook
 from execution.recovery import adopt_open_positions
 from execution.simulator import FillSimulator
@@ -96,9 +97,9 @@ class Executor:
             {"exchange": inst.get("exchange", "NSE"), "tradingsymbol": position["tradingsymbol"]},
             side, int(position["quantity"]))
 
-    async def market_exit(self, position: dict):
-        # P0#3: derive the exit order from the POSITION (product/exchange persisted
-        # at entry), never hardcode MIS. Unsupported/missing => fail closed (no order).
+    async def market_exit(self, position: dict) -> NormalizedFill:
+        # P0#3: derive product/exchange from the POSITION (never hardcode MIS).
+        # P0#4: poll the exit order and return BROKER TRUTH (a NormalizedFill).
         inst = await get_instrument(position["instrument_token"]) or {}
         side = "SELL" if position["side"] == "BUY" else "BUY"
         product = position.get("product")
@@ -108,10 +109,19 @@ class Executor:
             raise UnsafeLiveState(
                 f"cannot exit {position.get('tradingsymbol')}: unsupported exchange/product "
                 f"{exchange}/{product}")
-        return await self.governor.call(
+        qty = int(position["quantity"])
+        oid = await self.governor.call(
             "order", self.adapter.place_order, variety=variety, exchange=exchange,
             tradingsymbol=position["tradingsymbol"], transaction_type=side,
-            quantity=int(position["quantity"]), product=product, order_type="MARKET")
+            quantity=qty, product=product, order_type="MARKET")
+        st = await self._poll_order(oid)
+        filled = int(st.get("filled", 0) or 0)
+        avg = float(st.get("avg_price", 0) or 0)
+        status = normalize_exit_status(st.get("status"), filled)
+        seg = self.cost.segment_key(position["sleeve"], inst.get("instrument_type"))
+        fees = self.cost.compute_leg(seg, side, filled, avg) if (filled and avg) else {"total": 0.0}
+        return NormalizedFill(broker_order_id=oid, status=status, filled_qty=filled,
+                              avg_price=avg, pending_qty=max(0, qty - filled), fees=fees, ts=now_ist())
 
     # --- entry -----------------------------------------------------------
     async def execute(self, decision: Decision, force_fill_qty: int | None = None) -> ExecutionResult:
@@ -226,24 +236,50 @@ class Executor:
         if not row or row["status"] != "open":
             return None
         pos = dict(row)
-        px = price or await self.exit_price(pos) or fallback_price or float(pos["average_price"])
-        # Cost segment from the actual instrument type — option exits must be charged
-        # option rates (STT on premium etc.), not the futures schedule.
-        inst = await get_instrument(pos["instrument_token"]) or {}
-        seg = self.cost.segment_key(pos["sleeve"], inst.get("instrument_type"))
-        exit_side = "SELL" if pos["side"] == "BUY" else "BUY"
-        fees = self.cost.compute_leg(seg, exit_side, int(pos["quantity"]), px)
+        corr = pos.get("correlation_id")
         if self.mode == "live":
+            # P0#4: book from BROKER TRUTH — never fabricate a P&L from a quote.
             # Cancel the resting OCO FIRST so the broker can't fill it after our exit.
             await self._cancel_bracket(pos)
             try:
-                await self.market_exit(pos)
+                nf = await self.market_exit(pos)
             except Exception as exc:
-                log.error("market_exit_failed", id=position_id, error=str(exc))
-        realized = await self.book.close_position(position_id, px, fees, reason)
+                await self.book.mark_close_pending(position_id, None, f"market_exit error: {exc}")
+                await self.book.append_event(position_id, corr, "close_pending",
+                                             detail={"error": str(exc), "reason": reason})
+                log.error("market_exit_failed_close_pending", id=position_id, error=str(exc))
+                realized = None
+            else:
+                if close_books_fully(nf.status, nf.filled_qty, int(pos["quantity"])):
+                    realized = await self.book.close_position(position_id, nf.avg_price, nf.fees, reason)
+                    await self.book.append_event(position_id, corr, "full_close", nf, {"reason": reason})
+                else:
+                    await self.book.mark_close_pending(
+                        position_id, nf.broker_order_id,
+                        f"exit {nf.status} filled={nf.filled_qty}/{pos['quantity']}")
+                    await self.book.append_event(position_id, corr, "close_pending", nf, {"reason": reason})
+                    if self.alerter:
+                        await self.alerter.send_async(
+                            "Live exit needs reconcile",
+                            f"position {position_id} exit {nf.status} "
+                            f"filled {nf.filled_qty}/{pos['quantity']} — CLOSE_PENDING")
+                    realized = None
+        else:
+            # sim (unchanged): local depth-aware exit price + full cost model.
+            px = price or await self.exit_price(pos) or fallback_price or float(pos["average_price"])
+            inst = await get_instrument(pos["instrument_token"]) or {}
+            seg = self.cost.segment_key(pos["sleeve"], inst.get("instrument_type"))
+            exit_side = "SELL" if pos["side"] == "BUY" else "BUY"
+            fees = self.cost.compute_leg(seg, exit_side, int(pos["quantity"]), px)
+            realized = await self.book.close_position(position_id, px, fees, reason)
+
         self.guards.disarm(position_id)
         self._last_persist.pop(position_id, None)
-        # Re-entry cooldown so the same instrument can't be reopened next cycle (churn).
+        await self._reentry_cooldown(pos)
+        return realized
+
+    async def _reentry_cooldown(self, pos: dict) -> None:
+        """Cooldown so the same instrument can't be reopened next cycle (churn)."""
         try:
             cd = float(getattr(self.config.risk, "reentry_cooldown_minutes", 0) or 0)
             tok = pos.get("instrument_token")
@@ -252,7 +288,6 @@ class Executor:
                 await set_cooldown(f"eq:{tok}", cd)
         except Exception:
             pass
-        return realized
 
     async def on_price(self, position_id: int, price: float) -> ExecutionResult | None:
         """Fast-loop hook (Phase 5 drives this per tick): check guards, exit on a hit."""
@@ -289,6 +324,36 @@ class Executor:
             return {"outcome": "REJECTED", "reason": block, "correlation_id": correlation_id}
         return await open_structure(self, name, expiry, structure, lots, lot_size, strike_step,
                                     correlation_id, signal_id)
+
+    async def resolve_pending_closes(self) -> int:
+        """P0#4: finish CLOSE_PENDING live exits from broker truth. Poll each recorded
+        exit order; on COMPLETE, book it and close. Best-effort; returns count resolved."""
+        import json as _json
+        resolved = 0
+        for pos in await self.book.pending_closes("live"):
+            raw = pos.get("raw") or {}
+            if isinstance(raw, str):
+                raw = _json.loads(raw)
+            oid = (raw.get("close_pending") or {}).get("broker_order_id")
+            if not oid:
+                continue
+            try:
+                st = await self._poll_order(oid, attempts=1)
+                if st.get("status") != "COMPLETE":
+                    continue
+                inst = await get_instrument(pos["instrument_token"]) or {}
+                side = "SELL" if pos["side"] == "BUY" else "BUY"
+                avg = float(st.get("avg_price") or 0)
+                seg = self.cost.segment_key(pos["sleeve"], inst.get("instrument_type"))
+                fees = self.cost.compute_leg(seg, side, int(pos["quantity"]), avg) if avg else {"total": 0.0}
+                realized = await self.book.close_position(pos["id"], avg, fees, "reconcile_close_pending")
+                await self.book.append_event(pos["id"], pos.get("correlation_id"), "full_close",
+                                             detail={"resolved_from": "CLOSE_PENDING", "avg": avg,
+                                                     "realized": realized})
+                resolved += 1
+            except Exception as exc:
+                log.warning("resolve_pending_close_failed", id=pos["id"], error=str(exc))
+        return resolved
 
     async def adopt_open_positions(self) -> dict:
         await self.current_mode()

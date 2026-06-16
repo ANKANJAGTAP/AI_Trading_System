@@ -127,7 +127,7 @@ class PositionBook:
 
     async def close_position(self, pid: int, exit_price: float, exit_fees: dict, reason: str) -> float | None:
         pos = await fetchrow("SELECT * FROM positions WHERE id=$1", pid)
-        if not pos or pos["status"] != "open":
+        if not pos or pos["status"] not in ("open", "CLOSE_PENDING"):  # P0#4: finalize pending too
             return None
         qty, entry, side = int(pos["quantity"]), float(pos["average_price"]), pos["side"]
         gross = (exit_price - entry) * qty if side == "BUY" else (entry - exit_price) * qty
@@ -149,6 +149,39 @@ class PositionBook:
         await r.delete(f"pos:{pid}")
         log.info("position_closed", id=pid, realized=realized, reason=reason)
         return realized
+
+    # --- P0#4: broker-fill-truth helpers ------------------------------------
+    async def append_event(self, position_id: int, correlation_id, event_type: str,
+                           nf=None, detail: dict | None = None) -> None:
+        """Append-only position lifecycle event (entry/partial/full close/pending)."""
+        try:
+            await execute(
+                "INSERT INTO position_events (position_id, correlation_id, event_type, "
+                "broker_order_id, status, filled_qty, avg_price, pending_qty, fees, detail) "
+                "VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10::jsonb)",
+                position_id, str(correlation_id) if correlation_id else None, event_type,
+                getattr(nf, "broker_order_id", None), getattr(nf, "status", None),
+                getattr(nf, "filled_qty", None), getattr(nf, "avg_price", None),
+                getattr(nf, "pending_qty", None),
+                json.dumps(getattr(nf, "fees", None) or {}), json.dumps(detail or {}))
+        except Exception as exc:
+            log.warning("position_event_persist_failed", error=str(exc))
+
+    async def mark_close_pending(self, position_id: int, broker_order_id: str | None,
+                                 detail: str = "") -> None:
+        """A live exit that didn't cleanly complete: park the position in CLOSE_PENDING
+        (no fabricated P&L) for the reconcile loop to finish."""
+        await execute(
+            "UPDATE positions SET status='CLOSE_PENDING', "
+            "raw = COALESCE(raw,'{}'::jsonb) || $2::jsonb WHERE id=$1",
+            position_id, json.dumps({"close_pending": {"broker_order_id": broker_order_id,
+                                                       "detail": detail}}))
+        await (await get_redis()).srem(_OPEN_SET, str(position_id))
+        log.warning("position_close_pending", id=position_id, broker_order_id=broker_order_id, detail=detail)
+
+    async def pending_closes(self, mode: str = "live") -> list[dict]:
+        rows = await fetch("SELECT * FROM positions WHERE status='CLOSE_PENDING' AND mode=$1", mode)
+        return [dict(r) for r in rows]
 
     async def get_open(self, mode: str | None = None) -> list[dict]:
         if mode:

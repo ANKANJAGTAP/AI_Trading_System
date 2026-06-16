@@ -529,6 +529,7 @@ async def _slow_loop(cfg, orchestrator, risk, md_service) -> None:
                     bp = await md_service.governor.call("other", md_service.adapter.positions)
                     net = bp.get("net", []) if isinstance(bp, dict) else []
                     await executor.book.reconcile(net, mode="live")
+                    await executor.resolve_pending_closes()   # P0#4: finish CLOSE_PENDING exits
                     await (await get_redis()).set("aegis:feed:last_reconcile", now_ist().isoformat())
                 except Exception as exc:
                     log.error("reconcile_error", error=str(exc))

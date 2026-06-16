@@ -51,6 +51,19 @@ class Fill:
 
 
 @dataclass
+class NormalizedFill:
+    """Broker truth for an exit order (P0#4): what actually filled, at what price.
+    status: COMPLETE | PARTIAL | REJECTED | UNKNOWN."""
+    broker_order_id: str | None
+    status: str
+    filled_qty: int = 0
+    avg_price: float = 0.0
+    pending_qty: int = 0
+    fees: dict = field(default_factory=dict)
+    ts: datetime | None = None
+
+
+@dataclass
 class ExecutionResult:
     outcome: str                  # OrderOutcome.*
     decision: Decision
