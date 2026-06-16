@@ -142,6 +142,15 @@ async def _dependency_versions():
     return (PASS if not missing else WARN, f"{len(vers) - len(missing)}/{len(vers)} present", vers)
 
 
+async def _sebi_compliance():
+    from common.compliance import compliance_gaps
+    from config.loader import get_config
+    gaps = compliance_gaps(get_config())
+    if gaps:
+        return (FAIL, "; ".join(gaps), {"gaps": gaps})
+    return (PASS, "order tag + static IP + market protection + OPS<=10 configured")
+
+
 _CHECKS = [
     ("broker_token", _broker_token),
     ("broker_reachable", _broker_reachable),
@@ -157,6 +166,7 @@ _CHECKS = [
     ("clock", _clock),
     ("holiday_calendar", _holiday_calendar),
     ("dependency_versions", _dependency_versions),
+    ("sebi_compliance", _sebi_compliance),
 ]
 
 

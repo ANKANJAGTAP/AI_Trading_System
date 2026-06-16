@@ -6,6 +6,7 @@ sized to the ACTUALLY filled quantity, so partial fills are bracket-safe.
 """
 from __future__ import annotations
 
+from common.compliance import live_order_params
 from common.logging import get_logger
 from execution.guards import Guard
 
@@ -45,13 +46,15 @@ async def create_bracket(executor, decision, fill, position_id: int, mode: str) 
 
         def leg(price: float) -> dict:
             otype = stop_order_type if price == stop_px else "LIMIT"
-            return {
+            d = {
                 "exchange": decision.instrument["exchange"],
                 "tradingsymbol": decision.instrument["tradingsymbol"],
                 "transaction_type": exit_side, "quantity": fill.quantity,
                 "order_type": otype, "product": decision.product,
                 "price": (0 if otype == "MARKET" else price),
             }
+            d.update(live_order_params(executor.config, otype))   # P9: algo tag + mkt protection
+            return d
 
         try:
             gtt_id = await executor.governor.call(

@@ -13,6 +13,7 @@ import time
 
 from common.db import fetchrow
 from common.logging import get_logger
+from common.compliance import live_order_params
 from common.errors import UnsafeLiveState
 from common.market_time import now_ist
 from common.state import get_state, set_state
@@ -114,7 +115,8 @@ class Executor:
         oid = await self.governor.call(
             "order", self.adapter.place_order, variety=variety, exchange=exchange,
             tradingsymbol=position["tradingsymbol"], transaction_type=side,
-            quantity=qty, product=product, order_type="MARKET")
+            quantity=qty, product=product, order_type="MARKET",
+            **live_order_params(self.config, "MARKET"))   # P9: algo tag + market protection
         st = await self._poll_order(oid)
         filled = int(st.get("filled", 0) or 0)
         avg = float(st.get("avg_price", 0) or 0)
@@ -182,7 +184,8 @@ class Executor:
                     exchange=decision.instrument["exchange"], tradingsymbol=decision.instrument["tradingsymbol"],
                     transaction_type=decision.side, quantity=clip, product=decision.product,
                     order_type=decision.order_type,
-                    price=(decision.entry_price if decision.order_type == "LIMIT" else None))
+                    price=(decision.entry_price if decision.order_type == "LIMIT" else None),
+                    **live_order_params(self.config, decision.order_type))   # P9: algo tag + mkt protection
                 order_ids.append(oid)
                 st = await self._poll_order(oid)
                 cf = int(st["filled"])

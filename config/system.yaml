@@ -77,6 +77,16 @@ dataplatform:
   days_back: 3                 # re-pull a small trailing window (idempotent upsert)
   source: kite                 # kite (real) | synthetic (plumbing test)
 
+# SEBI retail-algo compliance (P9; framework mandatory 2026-04-01). Fill these in
+# before going live. Order throughput is already capped <=10 OPS by
+# data.rate_limits.order (the exempt "regular API" lane), so no exchange
+# registration is needed below that threshold.
+compliance:
+  algo_id: ""                  # exchange/broker Algo-ID stamped on every live order (<=20 chars)
+  static_ip: ""                # the static IP whitelisted at developers.kite.trade
+  market_protection_pct: 1.0   # market/SL-M order protection % (Kite rejects 0)
+  exchange_registered: false   # true only if the strategy is exchange-registered (>10 OPS)
+
 # Email alerts (SMTP). Events that must notify the operator (spec §9).
 alerts:
   email_enabled: true
