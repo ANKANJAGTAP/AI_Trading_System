@@ -6,6 +6,12 @@ mode: simulated_fill           # simulated_fill | live
 default_order_type: MARKET     # per-setup selection overrides (MARKET | LIMIT)
 slippage_bps: 2.0              # modelled slippage for simulated fills
 
+# P0#6: live multi-leg F&O structures are NOT implemented for real orders — they
+# run in paper only and are blocked (fail-closed) in live. This flag must stay
+# false until the full live basket lifecycle (all-leg rollback, per-leg margin
+# pre-check + reconciliation, orphan-leg kill switch) is built and tested.
+fno_live_structures_enabled: false
+
 # Cost model (always on, both modes). Indian/Zerodha defaults — calibrate in sim.
 # All values are placeholders to refine during the simulated-fill phase.
 cost_model:

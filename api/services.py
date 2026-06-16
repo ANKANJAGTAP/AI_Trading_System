@@ -484,7 +484,8 @@ async def health() -> dict:
             "error_rate": round(errs / total, 4) if total else 0.0,
             "mode": await current_mode(), "paused": bool(await get_state("engine_paused", False)),
             "kill_switch_active": bool(await get_state("kill_switch_active", False)),
-            "dd_circuit_active": bool(await get_state("dd_circuit_active", False))}
+            "dd_circuit_active": bool(await get_state("dd_circuit_active", False)),
+            "fno_live_structures_enabled": bool(getattr(cfg.execution, "fno_live_structures_enabled", False))}
 
 
 async def prelive_checklist() -> dict:

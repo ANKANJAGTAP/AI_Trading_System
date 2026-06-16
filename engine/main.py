@@ -470,8 +470,13 @@ async def _slow_loop(cfg, orchestrator, risk, md_service) -> None:
                     except Exception as exc:
                         log.error("intraday_eval_error", token=token, error=str(exc))
 
-            # 3. F&O universe (one open structure per underlying; per-sleeve toggle)
-            if await get_state("sleeve_fno_enabled", True):
+            # 3. F&O universe (one open structure per underlying; per-sleeve toggle).
+            # P0#6: in live, skip F&O entirely unless live structures are enabled
+            # (they aren't implemented for real orders) — don't even build contexts.
+            _mode_now = await get_state("execution_mode", cfg.execution.mode)
+            _fno_live_ok = not (_mode_now == "live"
+                                and not bool(getattr(cfg.execution, "fno_live_structures_enabled", False)))
+            if _fno_live_ok and await get_state("sleeve_fno_enabled", True):
                 open_names = {g.name for g in executor.structures.all()}
                 for entry in fno_universe:
                     try:

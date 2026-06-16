@@ -20,6 +20,7 @@ from execution.brackets import create_bracket
 from execution.costs import CostModel
 from execution.guards import GuardManager
 from execution.models import Decision, ExecutionResult, ExitReason, Fill, OrderOutcome
+from execution.policy import live_structures_block_reason
 from execution.position_book import PositionBook
 from execution.recovery import adopt_open_positions
 from execution.simulator import FillSimulator
@@ -263,10 +264,12 @@ class Executor:
             return {"outcome": "REJECTED", "reason": "engine halted", "correlation_id": correlation_id}
         if await get_state("kill_switch_active", False):
             return {"outcome": "REJECTED", "reason": "kill-switch active", "correlation_id": correlation_id}
-        if await self.current_mode() == "live":
-            log.warning("structure_live_not_implemented")
-            return {"outcome": "REJECTED", "reason": "live multi-leg execution not implemented (sim only)",
-                    "correlation_id": correlation_id}
+        block = live_structures_block_reason(
+            await self.current_mode(),
+            bool(getattr(self.config.execution, "fno_live_structures_enabled", False)))
+        if block:
+            log.warning("structure_live_blocked", reason=block)
+            return {"outcome": "REJECTED", "reason": block, "correlation_id": correlation_id}
         return await open_structure(self, name, expiry, structure, lots, lot_size, strike_step,
                                     correlation_id, signal_id)
 
