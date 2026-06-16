@@ -42,8 +42,12 @@ services:
       POSTGRES_HOST: timescaledb
       REDIS_HOST: redis
       TZ: Asia/Kolkata
+      # Pillar-1 data platform: read the shared F&O lake + the same TimescaleDB.
+      DATAPLATFORM_HOME: /data/dataplatform
+      TIMESCALE_DSN: postgresql://${POSTGRES_USER:-ats}:${POSTGRES_PASSWORD:-ats}@timescaledb:5432/${POSTGRES_DB:-ats}
     volumes:
       - ./.secrets:/app/.secrets    # shared Kite token (read-only) for live data reads
+      - ${DATAPLATFORM_HOME_HOST:-/home/ubuntu/.aitrading_data}:/data/dataplatform  # F&O lake (host cron writes, api reads)
     ports:
       # Bound to localhost by default — the control plane trades and flattens, so it
       # must NOT be exposed on all interfaces. Front it with an authenticating proxy
@@ -70,8 +74,13 @@ services:
       POSTGRES_HOST: timescaledb
       REDIS_HOST: redis
       TZ: Asia/Kolkata
+      # Pillar-1 data platform: the F&O lake (host cron writes) + shared TimescaleDB.
+      # The opt-in in-engine ingest job (system.dataplatform.enabled) uses these too.
+      DATAPLATFORM_HOME: /data/dataplatform
+      TIMESCALE_DSN: postgresql://${POSTGRES_USER:-ats}:${POSTGRES_PASSWORD:-ats}@timescaledb:5432/${POSTGRES_DB:-ats}
     volumes:
       - ./.secrets:/app/.secrets
+      - ${DATAPLATFORM_HOME_HOST:-/home/ubuntu/.aitrading_data}:/data/dataplatform  # F&O lake (host cron writes, api reads)
     depends_on:
       timescaledb:
         condition: service_healthy

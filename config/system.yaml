@@ -64,11 +64,15 @@ meta_label:
   soft_floor: 0.6              # mild shrink floor inside the dead band
 
 # Data platform (Pillar 1) — curated point-in-time F&O lake + a shared operational
-# store. The engine compounds history forward with a daily EOD ingestion job that
-# writes to the Parquet lake AND, when TIMESCALE_DSN is set, the SAME TimescaleDB
-# the live app uses. Best-effort: a failed pull only logs, never affects trading.
+# store (TimescaleDB) read by the /api/fno/* research endpoints.
+#
+# PRIMARY ingestion is the host cron (dataplatform/daily_capture.sh): a SEPARATE
+# process with its own isolated Kite token, writing the lake + (with TIMESCALE_DSN)
+# the shared DB. The in-engine job below is OPT-IN and OFF by default on purpose:
+# minting a Kite token inside the live engine process would share the app's token
+# file + env, so it must only be enabled with an isolated DATAPLATFORM token path.
 dataplatform:
-  enabled: true                # schedule the in-engine daily ingestion job
+  enabled: false               # opt-in in-engine ingestion (host cron is primary)
   ingest_time: "18:45"         # IST — after the 15:30 close + vendor settle
   days_back: 3                 # re-pull a small trailing window (idempotent upsert)
   source: kite                 # kite (real) | synthetic (plumbing test)
