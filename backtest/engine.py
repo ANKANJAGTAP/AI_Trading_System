@@ -31,6 +31,7 @@ from research.features import signal_features
 from backtest.data_window import DataWindow
 from backtest.metrics import compute_metrics
 from backtest.sim_broker import BacktestBroker
+from backtest.execution_model import resolve_intrabar_exit
 
 
 def attach_discrimination(result: dict) -> dict:
@@ -68,9 +69,11 @@ async def win_load_index(token, from_dt, to_dt):
 
 
 def _close_trade(pos: dict, exit_ref: float, ts, broker: BacktestBroker, seg: str,
-                 reason: str) -> dict:
+                 reason: str, exit_fill_price: float | None = None) -> dict:
     side, qty, entry = pos["side"], pos["qty"], pos["entry"]
-    exit_fill = broker.exit_fill(side, exit_ref)
+    # P25: stop/target pass a pre-computed honest fill (gap-aware); market exits
+    # (square-off / eod) leave it None and cross the spread via the cost model.
+    exit_fill = exit_fill_price if exit_fill_price is not None else broker.exit_fill(side, exit_ref)
     gross = (exit_fill - entry) * qty if side == "BUY" else (entry - exit_fill) * qty
     exit_side = "SELL" if side == "BUY" else "BUY"
     exit_fees = broker.fees(seg, exit_side, qty, exit_fill)
@@ -86,18 +89,14 @@ def _close_trade(pos: dict, exit_ref: float, ts, broker: BacktestBroker, seg: st
 
 def _check_exit(pos: dict, bar, ts, broker, seg, hard_exit: str | None) -> dict | None:
     side, stop, target = pos["side"], pos["stop"], pos["target"]
-    hi, lo, close = float(bar["high"]), float(bar["low"]), float(bar["close"])
-    # Conservative tie-break: if a bar spans both stop and target, assume stop first.
-    if side == "BUY":
-        if stop and lo <= stop:
-            return _close_trade(pos, stop, ts, broker, seg, "stop")
-        if target and hi >= target:
-            return _close_trade(pos, target, ts, broker, seg, "target")
-    else:
-        if stop and hi >= stop:
-            return _close_trade(pos, stop, ts, broker, seg, "stop")
-        if target and lo <= target:
-            return _close_trade(pos, target, ts, broker, seg, "target")
+    o, hi, lo, close = float(bar["open"]), float(bar["high"]), float(bar["low"]), float(bar["close"])
+    # P25: honest intrabar fills. A gap through the stop fills at the (worse) open —
+    # stops aren't guaranteed; a limit target fills at the limit-or-better; a bar that
+    # spans both resolves stop-first (conservative). Same exit bar/reason as the old
+    # touch logic, just a truthful fill price instead of "filled exactly at the level".
+    reason, fill = resolve_intrabar_exit(side, stop, target, o, hi, lo, broker.slippage_bps)
+    if reason is not None:
+        return _close_trade(pos, fill, ts, broker, seg, reason, exit_fill_price=fill)
     if hard_exit and _ist(ts).time() >= parse_hhmm(hard_exit):
         return _close_trade(pos, close, ts, broker, seg, "square_off_time")
     return None
