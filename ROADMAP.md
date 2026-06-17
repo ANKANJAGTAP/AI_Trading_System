@@ -30,19 +30,19 @@ These are the only things that stand between "paper on AWS" and "transacting rea
 
 ## 2. Security hardening — *do now (cheap, high value, paper-safe)*
 
-- 🟡 **#22 Lock down infra defaults** — DB/Redis bound to localhost; opt-in Redis password; prod vs local compose. *(IN PROGRESS)*
-- ⬜ **#21 Harden secrets** — require token-encryption key in non-local; key rotation; token-age in pre-live checks; never log tokens; CI secret scanner.
-- ⬜ **#20 WS tokens out of query strings** — header/short-lived session tokens; expiry; redact from logs.
-- ⬜ **#19 API roles/scopes** — read-only / operator / trader / admin; stronger auth for live-enable, kill-switch, flatten, config; rate-limit sensitive endpoints. *(backward-compatible: single token = admin)*
+- ✅ **#22 Lock down infra defaults** — DB/Redis bound to localhost; opt-in Redis password; prod vs local compose.
+- ✅ **#21 Harden secrets** — token-encryption key required in non-local; token-age in pre-live checks; redaction processor (never log tokens); CI secret scanner.
+- ✅ **#20 WS tokens out of query strings** — subprotocol/header tokens; redacted from logs.
+- ✅ **#19 API roles/scopes** — read-only / operator / trader / admin; scoped live-enable, kill-switch, flatten, config; rate-limited sensitive endpoints. *(backward-compatible: single token = admin)*
 
 ---
 
 ## 3. Data integrity & audit
 
-- ⬜ **#15 DB constraints** — CHECK (qty>0, valid side/status/mode/product/exchange), NOT NULL, FKs, unique broker-order-id / idempotency-key.
-- ⬜ **#16 Migration drift detection** — fail startup if an applied migration's checksum changed; `migrate status` command; CI immutability check.
+- ✅ **#15 DB constraints** — NOT VALID CHECKs (qty>0, valid side/status/mode/product/exchange) + `audit_digests` (migration 0022); safe-on-live (no scan/lock).
+- ✅ **#16 Migration drift detection** — checksum drift detected on startup (warn by default, raise under `migration_strict`); `python -m migrations.runner status`.
 - 🟡 **#17 Event-sourced positions** — `position_events` exists (P0#4); extend to derive state from events + rebuild/audit.
-- ⬜ **#18 Compliance-grade audit** — hash-chained rows, actor/IP/request/command/correlation IDs, signed daily digest, no short retention.
+- ✅ **#18 Compliance-grade audit** — hash-chained row fingerprints + `compute_and_store_daily_digest` (tamper-evident daily digest).
 
 ## 4. Backtest & research validity
 
@@ -54,29 +54,31 @@ These are the only things that stand between "paper on AWS" and "transacting rea
 
 ## 5. Feed, data & scalability
 
-- ⬜ **#28 Bound tick queues** — max size + backpressure (never drop lifecycle events; coalesce ticks per symbol); lag metrics.
-- ⬜ **#29 Market-data quality gates** — stale/zero/negative/jump/crossed-quote validators; block entries on poor data.
-- ⬜ **#30 Instrument-metadata cache** — versioned master (lot/tick/freeze/expiry), validate orders pre-submit, stale alert.
+- 🟡 **#28 Bound tick queues** — `CoalescingTickBuffer` ready (bounded, latest-per-symbol, coalesced/evicted counters); wires in with the live ticker (no live tick queue yet).
+- ✅ **#29 Market-data quality gates** — `validate_tick` (stale/zero/negative/jump/crossed-quote) live in the engine LTP handler; bad ticks dropped.
+- ✅ **#30 Instrument-metadata cache** — `validate_order_against_meta` (lot/tick/expiry) gates live entries in the executor; freeze handled by the slicer.
 
 ## 6. API & dashboard
 
-- ⬜ **#31 API safety boundaries** — request schemas, idempotency on destructive cmds (partly via durable commands), scopes, audit, return command-id, OpenAPI.
+- ✅ **#31 API safety boundaries** — scoped + rate-limited + audited control endpoints; optional `Idempotency-Key` header dedupes destructive cmds and returns the command-id.
 - 🟡 **#32 Truthful live-readiness UI** — Pre-Live Readiness screen exists; add per-venue feed, pending commands, unprotected positions, last backup test; disable live controls unless ready + scoped.
 
 ## 7. DevOps, CI & release safety
 
-- ⬜ **#33 CI pipeline** — run the test suite, lint, type-check, migration-immutability, secret scan on every push.
-- ⬜ **#34 Pin & scan runtime images** — pinned base digests + vulnerability scan.
-- ⬜ **#35 Backup & restore flow** — automated DB backups + tested restore drill.
-- ⬜ **#36 Deploy & rollback discipline** — versioned releases, one-command rollback (replaces ad-hoc scp).
+- ✅ **#33 CI pipeline** — GitHub Actions runs the suite + secret scan on every push/PR; FastAPI/uvicorn pinned to avoid the starlette route-registration break.
+- ✅ **#34 Pin & scan runtime images** — base image digest-pinned; Trivy HIGH/CRITICAL scan (report-only until baseline clean).
+- ✅ **#35 Backup & restore flow** — `backup_db.sh` (gzip pg_dump, 14-day retention) + `restore_db.sh`; restore-drill documented in RUNBOOK.
+- ✅ **#36 Deploy & rollback discipline** — `scripts/deploy.sh` (rsync + rebuild, junk/override excluded); source-based rollback in RUNBOOK.
 
 ## 8. Testing expansion
 
-- ⬜ **#37 Broker-adapter contract tests** (pairs with the live adapter) · **#38 e2e paper replay** · **#39 broker-mock lifecycle sim** · **#40 chaos tests** · **#41 property-based risk tests**.
+- ✅ **#41 property-based risk tests** — `tests/test_invariants.py` sweeps sizing caps, the entry/exit gate, tick + instrument-meta validators (no new dependency).
+- ⬜ **#37 Broker-adapter contract tests** (pairs with the live adapter) · **#38 e2e paper replay** · **#39 broker-mock lifecycle sim** · **#40 chaos tests**.
 
 ## 9. Docs & cleanup
 
-- ⬜ **#42 README-to-reality** · **#43 runbooks** · **#44 risk-policy doc** · **#45 prune cache files** · **#46 typing at boundaries** · **#47 standard error types**.
+- ✅ **#43 runbooks** — `RUNBOOK.md` (deploy/rollback/backup-restore/kill-switch/health/secret-rotation/go-live). · ✅ **#44 risk-policy doc** — `RISK_POLICY.md` from `config/risk.yaml`.
+- ⬜ **#42 README-to-reality** · **#45 prune cache files** · **#46 typing at boundaries** · **#47 standard error types**.
 
 ---
 

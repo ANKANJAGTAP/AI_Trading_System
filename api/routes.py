@@ -4,7 +4,7 @@ commands (flatten/close/modify). Every action is audited and guarded.
 """
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from pydantic import BaseModel
 
 from api import analytics as analytics_svc
@@ -256,12 +256,18 @@ async def control_pause(b: PauseBody):
 
 @router.post("/controls/flatten",
              dependencies=[Depends(require_scope(TRADER)), Depends(rate_limit("flatten", 6, 60))])
-async def control_flatten(b: ConfirmBody):
+async def control_flatten(b: ConfirmBody,
+                          idempotency_key: str | None = Header(default=None, alias="Idempotency-Key")):
     if not b.confirm:
         raise HTTPException(400, "flatten requires confirm=true")
-    await enqueue_command({"type": "flatten", "reason": "operator flatten-all"})
-    await audit("control_flatten", "api", "operator flatten-all requested")
-    return {"ok": True, "queued": True}
+    # #31: optional Idempotency-Key dedupes a re-sent flatten (double-click / retry)
+    # to a single engine command; without it behaviour is unchanged. Return the id
+    # so the client can correlate the action with its lifecycle.
+    cid = await enqueue_command({"type": "flatten", "reason": "operator flatten-all"},
+                                idempotency_key=idempotency_key)
+    await audit("control_flatten", "api", "operator flatten-all requested",
+                payload={"command_id": cid, "idempotency_key": idempotency_key})
+    return {"ok": True, "queued": True, "command_id": cid}
 
 
 @router.post("/controls/sleeve/{sleeve}", dependencies=[Depends(require_scope(OPERATOR))])
@@ -327,19 +333,25 @@ async def control_ks_reset(b: ConfirmBody):
 
 @router.post("/positions/{position_id}/close",
              dependencies=[Depends(require_scope(TRADER)), Depends(rate_limit("close", 30, 60))])
-async def close_position(position_id: str, b: ConfirmBody):
+async def close_position(position_id: str, b: ConfirmBody,
+                         idempotency_key: str | None = Header(default=None, alias="Idempotency-Key")):
     if not b.confirm:
         raise HTTPException(400, "close requires confirm=true")
-    await enqueue_command({"type": "close", "id": position_id})
-    await audit("control_close", "api", f"close {position_id}", payload={"id": position_id})
-    return {"ok": True, "queued": True}
+    cid = await enqueue_command({"type": "close", "id": position_id},
+                                idempotency_key=idempotency_key)
+    await audit("control_close", "api", f"close {position_id}",
+                payload={"id": position_id, "command_id": cid})
+    return {"ok": True, "queued": True, "command_id": cid}
 
 
 @router.post("/positions/{position_id}/modify", dependencies=[Depends(require_scope(TRADER))])
-async def modify_position(position_id: str, b: ModifyBody):
-    await enqueue_command({"type": "modify", "id": position_id, "stop": b.stop, "target": b.target})
-    await audit("control_modify", "api", f"modify {position_id}", payload=b.model_dump())
-    return {"ok": True, "queued": True}
+async def modify_position(position_id: str, b: ModifyBody,
+                          idempotency_key: str | None = Header(default=None, alias="Idempotency-Key")):
+    cid = await enqueue_command({"type": "modify", "id": position_id, "stop": b.stop, "target": b.target},
+                                idempotency_key=idempotency_key)
+    await audit("control_modify", "api", f"modify {position_id}",
+                payload={**b.model_dump(), "command_id": cid})
+    return {"ok": True, "queued": True, "command_id": cid}
 
 
 _EDITABLE = {"risk.paper_per_trade_pct": (0.25, 2.0), "risk.paper_daily_max_loss_pct": (1.0, 6.0)}
