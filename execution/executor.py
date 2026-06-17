@@ -25,7 +25,7 @@ from execution.models import Decision, ExecutionResult, ExitReason, Fill, Normal
 from execution.order_lifecycle import UNSAFE_STATES, entry_outcome
 from execution.policy import (close_books_fully, duplicate_exit_risk, entry_meta_block_reason,
                               exit_product_supported, live_structures_block_reason,
-                              normalize_exit_status, order_allowed)
+                              normalize_exit_status, order_allowed, reduce_order_history)
 from execution.position_book import PositionBook
 from execution.recovery import adopt_open_positions
 from execution.simulator import FillSimulator
@@ -154,19 +154,21 @@ class Executor:
                                fees_total=fill.fees["total"], position_id=pid, bracket=bracket)
 
     async def _poll_order(self, order_id: str, attempts: int = 12, delay: float = 0.5) -> dict:
-        hist: list[dict] = []
+        # P0#4: poll until the broker reaches a terminal state. The pure reduction
+        # (history list -> broker truth) lives in policy.reduce_order_history so it
+        # is unit-tested against the broker contract sim. Behaviour is unchanged: a
+        # terminal poll returns broker truth; a timeout returns a PARTIAL placeholder
+        # that market_exit re-normalizes (filled 0 -> UNKNOWN).
+        rec = {"status": None, "filled": 0, "avg_price": 0.0, "reason": None, "terminal": False}
         for _ in range(attempts):
             hist = await self.governor.call("other", self.adapter.order_history, order_id)
-            last = hist[-1] if hist else {}
-            status = last.get("status")
-            if status in ("COMPLETE", "REJECTED", "CANCELLED"):
-                return {"status": status, "filled": int(last.get("filled_quantity", 0)),
-                        "avg_price": float(last.get("average_price") or 0),
-                        "reason": last.get("status_message")}
+            rec = reduce_order_history(hist)
+            if rec["terminal"]:
+                return {"status": rec["status"], "filled": rec["filled"],
+                        "avg_price": rec["avg_price"], "reason": rec["reason"]}
             await asyncio.sleep(delay)
-        last = hist[-1] if hist else {}
-        return {"status": "PARTIAL", "filled": int(last.get("filled_quantity", 0)),
-                "avg_price": float(last.get("average_price") or 0), "reason": "poll timeout"}
+        return {"status": "PARTIAL", "filled": rec["filled"],
+                "avg_price": rec["avg_price"], "reason": "poll timeout"}
 
     async def _execute_live(self, decision: Decision) -> ExecutionResult:
         # P0#3: never open what we can't exit — reject unsupported exchange/product

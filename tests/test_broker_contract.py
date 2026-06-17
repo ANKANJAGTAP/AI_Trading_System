@@ -19,7 +19,7 @@ from broker.mock_broker import (CANCELLED, COMPLETE, OPEN, REJECTED, SCENARIOS,
 from execution.order_lifecycle import (PROTECTED, RECONCILE_REQUIRED,
                                        UNPROTECTED, entry_outcome)
 from execution.policy import (close_books_fully, duplicate_exit_risk,
-                              normalize_exit_status)
+                              normalize_exit_status, reduce_order_history)
 
 
 def _poll(mb: MockBroker, oid: str, times: int = 1) -> dict:
@@ -205,3 +205,40 @@ def test_gtt_oco_lifecycle():
 def test_scenarios_constant_matches_engine():
     assert SCENARIOS == {"complete", "partial_then_complete", "partial_then_stuck",
                          "rejected", "no_fill"}
+
+
+# ----------------------------------------------------- full reduction chain
+# These exercise the exact pure reduction the live executor uses (_poll_order ->
+# policy.reduce_order_history), end to end against the broker sim.
+def test_reduce_order_history_matches_broker_truth():
+    mb = MockBroker(default_scenario="complete")
+    oid = mb.place_order(tradingsymbol="INFY", exchange="NSE",
+                         transaction_type="SELL", quantity=75, order_type="MARKET")
+    rec = reduce_order_history(mb.order_history(oid))
+    assert rec["terminal"] is True and rec["status"] == COMPLETE and rec["filled"] == 75
+    # empty / missing history -> safe non-terminal record (keep polling, never crash)
+    empty = reduce_order_history([])
+    assert empty["status"] is None and empty["filled"] == 0 and empty["terminal"] is False
+
+
+def test_full_chain_history_to_booking_decision():
+    """broker order_history -> reduce -> normalize -> close_books_fully, for every
+    scenario, mirroring the executor's poll loop."""
+    expected = {
+        "complete": ("COMPLETE", True),
+        "partial_then_stuck": ("PARTIAL", False),
+        "rejected": ("REJECTED", False),
+        "no_fill": ("UNKNOWN", False),
+    }
+    for scenario, (exp_norm, exp_book) in expected.items():
+        mb = MockBroker(default_scenario=scenario)
+        oid = mb.place_order(tradingsymbol="INFY", exchange="NSE",
+                             transaction_type="SELL", quantity=100, order_type="MARKET")
+        rec: dict = {"terminal": False, "status": None, "filled": 0}
+        for _ in range(3):                      # the executor polls until terminal
+            rec = reduce_order_history(mb.order_history(oid))
+            if rec["terminal"]:
+                break
+        norm = normalize_exit_status(rec["status"], rec["filled"])
+        assert norm == exp_norm, (scenario, norm)
+        assert close_books_fully(norm, rec["filled"], 100) is exp_book, scenario

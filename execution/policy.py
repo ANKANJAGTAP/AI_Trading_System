@@ -34,6 +34,28 @@ def close_books_fully(status: str, filled_qty: int, position_qty: int) -> bool:
     return status == "COMPLETE" and filled_qty >= position_qty
 
 
+TERMINAL_BROKER_STATES = frozenset({"COMPLETE", "REJECTED", "CANCELLED"})
+
+
+def reduce_order_history(history: list[dict] | None) -> dict:
+    """P0#4: pure reduction of a Kite order_history list to the latest broker truth.
+
+    Kite returns order_history as a list of state rows (oldest first); the truth is
+    the last row. Returns {status, filled, avg_price, reason, terminal}; `terminal`
+    tells the poll loop whether to stop (COMPLETE/REJECTED/CANCELLED) or keep
+    polling. No I/O — drive it with whatever order_history() returned, so it is
+    unit-tested against the broker contract sim."""
+    last = history[-1] if history else {}
+    status = last.get("status")
+    return {
+        "status": status,
+        "filled": int(last.get("filled_quantity", 0) or 0),
+        "avg_price": float(last.get("average_price") or 0.0),
+        "reason": last.get("status_message"),
+        "terminal": status in TERMINAL_BROKER_STATES,
+    }
+
+
 # Bracket lifecycle states (P0#7).
 BRACKET_REQUESTED = "BRACKET_REQUESTED"
 BRACKET_ACTIVE = "BRACKET_ACTIVE"
