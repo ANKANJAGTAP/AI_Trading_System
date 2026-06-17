@@ -14,7 +14,7 @@ Merges `upgrade.md` (safety ladder) + `WORLDCLASS_FNO_PLATFORM_PLAN.md` (institu
 - ✅ **P9** — SEBI-2026 algo compliance (Algo-ID tagging, market protection, OPS limiter, static-IP/OAuth gate, audit).
 - ✅ **Pillar 1 (data platform)** — contract/expiry resolver, bhavcopy EOD lake, Timescale schema, quality jobs, research API.
 - ✅ **Ops** — daily health digest, F&O Research + Pre-Live Readiness dashboard screens.
-- ✅ Migrations 0013–0021 applied; 270 tests green; paper-mode live on AWS.
+- ✅ Migrations 0013–0022 applied; full suite green (398 tests); paper-mode live on AWS.
 
 ---
 
@@ -22,7 +22,7 @@ Merges `upgrade.md` (safety ladder) + `WORLDCLASS_FNO_PLATFORM_PLAN.md` (institu
 
 These are the only things that stand between "paper on AWS" and "transacting real capital."
 
-- ⬜ 🔒 **Real Kite broker adapter** — `broker/kite_adapter.py` is a skeleton: auth/token refresh work; `place_order`, `positions`, `historical`, `quote`, websocket `subscribe`, GTT/OCO all raise `NotImplementedError`. Fill in + contract-test against Kite. *(maps to upgrade #37 + world-class Phase 1/5)*
+- ⬜ 🔒 **Validate the real Kite adapter live** — `broker/kite_adapter.py` methods are thin Kite-SDK pass-throughs (orders/positions/historical/quote/GTT/OCO; auth + token refresh work). Contract behaviour is pinned by `tests/test_broker_contract.py` + the `MockBroker` sim, and `scripts/verify_broker_adapter.py` checks the live read + order→fill→book path read-only. Remaining: run that validation against real Kite (your Mac) + the streaming websocket feed. *(maps to upgrade #37 + world-class Phase 1/5)*
 - ⬜ 🔒 **Rotate leaked secrets** — Kite key/secret + DB password were exposed in plaintext earlier. Rotate at the source (Kite console / DB) — **user action**, Claude cannot enter credentials.
 - ⬜ 🔒 **Live market-data feed** — real-time websocket tick stream + per-venue feed health (depends on the adapter).
 
@@ -46,10 +46,10 @@ These are the only things that stand between "paper on AWS" and "transacting rea
 
 ## 4. Backtest & research validity
 
-- ⬜ **#23 Historical option-chain backtests** — real bid/ask/OI/IV/Greeks (replace modeled proxies); liquidity filters; expiry effects.
+- 🟡 **#23 Historical option-chain backtests** — ✅ option-leg fill realism (`backtest/option_fills.py`: bid/ask crossing, spread cap, OI/volume liquidity gate), pure + unit-tested. ⬜ still (data-dependent): source a real historical option chain (bid/ask/OI/IV/Greeks), wire the fill model into `fno_engine` to replace the flat slippage, model expiry effects.
 - ⬜ **#24 Align backtest & live params** — shared config, persisted config hash per run, mismatch test.
 - 🟡 **#25 Execution realism** — ✅ honest intrabar fills (gap-through-stop fills at the open, limit-target fills at limit-or-better, both-touched resolves stop-first, directional slippage) in `backtest/execution_model.py`, wired into the engine + unit-tested. ⬜ still: order-rejection, rate-limit, and freeze-qty modeling.
-- 🟡 **#26 Walk-forward + OOS** — ✅ overfitting-stats core (`backtest/validation.py`: Probabilistic & Deflated Sharpe + PBO/CSCV), ✅ every backtest now reports PSR, ✅ sweep verdict (`backtest/sweep.py`: align → DSR → PBO → robust/inconclusive/overfit) ready to wire to an endpoint. ⬜ still: a sweep runner on the backtest API, regime buckets, parameter-decay kill criteria.
+- 🟡 **#26 Walk-forward + OOS** — ✅ overfitting-stats core (`backtest/validation.py`: Probabilistic & Deflated Sharpe + PBO/CSCV), ✅ every backtest now reports PSR, ✅ sweep verdict (`backtest/sweep.py`) **live at `POST /api/backtest/sweep`** (runs a config grid → robust/inconclusive/overfit). ⬜ still: regime buckets, parameter-decay kill criteria.
 - ✅ **#27 Meta-label discipline** — already enforced in `api/research.train_and_register`: min-sample + class-balance gates, purged expanding-window CV with embargo (leakage-safe), activate-only-if-it-beats-baseline validation gate; model versioning + rollback in `research/registry.py` (`save_model`/`list_models`/`activate`). ✅ triple-barrier labeling (`research/triple_barrier.py`) added as the honest label primitive. ⬜ optional: train an alternative model on triple-barrier labels (needs per-signal price paths).
 
 ## 5. Feed, data & scalability

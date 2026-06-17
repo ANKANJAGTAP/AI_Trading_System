@@ -134,6 +134,37 @@ async def get_backtest_run(run_id: int):
     return await backtest_svc.get_run(run_id)
 
 
+class SweepConfigItem(BaseModel):
+    label: str | None = None
+    overrides: dict = {}            # dotted cfg path -> value, e.g. {"risk.per_instrument_cap_pct": 10}
+
+
+class SweepBody(BaseModel):
+    symbols: list[str]
+    from_date: str
+    to_date: str
+    sleeve: str = "intraday_stocks"
+    starting_capital: float = 1_000_000.0
+    per_trade_pct: float = 1.0
+    configs: list[SweepConfigItem]
+    n_splits: int = 10
+
+
+@router.post("/backtest/sweep",
+             dependencies=[Depends(require_scope(OPERATOR)), Depends(rate_limit("sweep", 3, 60))])
+async def post_backtest_sweep(b: SweepBody):
+    # #26: run a small config grid over the same window and return the overfitting
+    # verdict (Deflated Sharpe + PBO). Synchronous + bounded; OPERATOR-scoped + rate-limited.
+    res = await backtest_svc.run_sweep(
+        b.sleeve, b.symbols, b.from_date, b.to_date, b.starting_capital,
+        b.per_trade_pct, [c.model_dump() for c in b.configs], n_splits=b.n_splits)
+    if res.get("error"):
+        raise HTTPException(400, res["error"])
+    await audit("backtest_sweep", "api", f"{b.sleeve} {len(b.configs)} configs",
+                payload={"verdict": res.get("verdict"), "pbo": res.get("pbo")})
+    return res
+
+
 # ---------------------------------------------------------------- research (Phase 4)
 class TrainBody(BaseModel):
     name: str | None = None

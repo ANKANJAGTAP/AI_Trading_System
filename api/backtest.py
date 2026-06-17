@@ -4,6 +4,7 @@ and read them back for the Research screen.
 from __future__ import annotations
 
 import asyncio
+import copy
 import json
 from datetime import date
 
@@ -11,6 +12,10 @@ from common.db import execute, fetch, fetchrow
 from common.logging import get_logger
 from common.market_time import now_ist
 from backtest.engine import BacktestParams, run_backtest
+from backtest.sweep import report_from_results
+from config.loader import get_config
+
+MAX_SWEEP_CONFIGS = 12          # each config is a full backtest — keep a sweep bounded
 
 log = get_logger("api_backtest")
 
@@ -101,3 +106,65 @@ async def list_runs(limit: int = 50) -> list[dict]:
                     "net_pnl": (m or {}).get("net_pnl"), "trades": (m or {}).get("trades"),
                     "win_rate": (m or {}).get("win_rate"), "expectancy_R": (m or {}).get("expectancy_R")})
     return out
+
+
+def _apply_cfg_overrides(base_cfg, overrides: dict):
+    """Deep-copy the (cached, shared) config and apply dotted-path overrides, e.g.
+    {"strategy.intraday_stocks.time_gates.hard_exit": "15:00"}. Walks pydantic
+    attributes and plain dicts alike. Never mutates the shared config."""
+    cfg = copy.deepcopy(base_cfg)
+    for path, value in (overrides or {}).items():
+        parts = str(path).split(".")
+        obj = cfg
+        for p in parts[:-1]:
+            obj = obj[p] if isinstance(obj, dict) else getattr(obj, p)
+        last = parts[-1]
+        if isinstance(obj, dict):
+            obj[last] = value
+        else:
+            setattr(obj, last, value)
+    return cfg
+
+
+async def run_sweep(sleeve: str, symbols: list[str], from_date: str, to_date: str,
+                    starting_capital: float, per_trade_pct: float,
+                    configs: list[dict], n_splits: int = 10) -> dict:
+    """Run the SAME window across a small grid of config variants, then return the
+    overfitting verdict (Deflated Sharpe + PBO) from the tested sweep core. Each
+    config = {"label": str, "overrides": {dotted_path: value}}. Synchronous (each
+    config is a full backtest) and bounded by MAX_SWEEP_CONFIGS."""
+    if not symbols:
+        return {"error": "no symbols"}
+    if not configs or len(configs) < 2:
+        return {"error": "a sweep needs at least 2 configs"}
+    if len(configs) > MAX_SWEEP_CONFIGS:
+        return {"error": f"too many configs ({len(configs)} > {MAX_SWEEP_CONFIGS})"}
+    try:
+        from_dt, to_dt = _parse_date(from_date), _parse_date(to_date)
+    except Exception:
+        return {"error": "from_date/to_date must be YYYY-MM-DD"}
+    if from_dt >= to_dt:
+        return {"error": "from_date must be before to_date"}
+
+    base = get_config()
+    params = BacktestParams(symbols=symbols, from_dt=from_dt, to_dt=to_dt, sleeve=sleeve,
+                            starting_capital=starting_capital, per_trade_pct=per_trade_pct)
+    results: dict[str, dict] = {}
+    seen: set[str] = set()
+    for i, c in enumerate(configs):
+        label = str(c.get("label") or f"cfg{i + 1}")
+        if label in seen:
+            label = f"{label}#{i + 1}"
+        seen.add(label)
+        try:
+            cfg = _apply_cfg_overrides(base, c.get("overrides") or {})
+        except Exception as exc:
+            return {"error": f"bad overrides for '{label}': {exc}"}
+        res = await run_backtest(params, cfg)
+        if res.get("error"):
+            return {"error": f"config '{label}': {res['error']}"}
+        results[label] = res
+
+    report = report_from_results(results, starting_capital, n_splits=n_splits)
+    report["trades_per_config"] = {k: len(v.get("trades", [])) for k, v in results.items()}
+    return report
