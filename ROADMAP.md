@@ -49,7 +49,7 @@ These are the only things that stand between "paper on AWS" and "transacting rea
 - ⬜ **#23 Historical option-chain backtests** — real bid/ask/OI/IV/Greeks (replace modeled proxies); liquidity filters; expiry effects.
 - ⬜ **#24 Align backtest & live params** — shared config, persisted config hash per run, mismatch test.
 - 🟡 **#25 Execution realism** — ✅ honest intrabar fills (gap-through-stop fills at the open, limit-target fills at limit-or-better, both-touched resolves stop-first, directional slippage) in `backtest/execution_model.py`, wired into the engine + unit-tested. ⬜ still: order-rejection, rate-limit, and freeze-qty modeling.
-- ⬜ **#26 Walk-forward + OOS** — train/val/test by time, regime buckets, parameter-stability + decay kill criteria.
+- 🟡 **#26 Walk-forward + OOS** — ✅ overfitting-stats core: Probabilistic & Deflated Sharpe + PBO (CSCV) in `backtest/validation.py`, unit-tested. ⬜ still: walk-forward train/val/test wiring, regime buckets, parameter-stability + decay kill criteria.
 - ⬜ **#27 Meta-label discipline** — keep model off until min sample/class-balance; dataset-quality + leakage report; model versioning + rollback.
 
 ## 5. Feed, data & scalability
