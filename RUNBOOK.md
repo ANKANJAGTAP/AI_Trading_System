@@ -90,11 +90,31 @@ Secrets live in the server `~/ai-trading/.env` (gitignored, never deployed over)
 - **Token encryption:** set `TOKEN_ENCRYPTION_KEY` (Fernet) so the broker token is encrypted at rest; the pre-live `token_security` probe (#21) then passes outside dev.
 - **API tokens:** set `API_TOKEN_READONLY/OPERATOR/TRADER/ADMIN` (#19) and distribute per role; the legacy single `API_AUTH_TOKEN` acts as admin.
 
+## Broker adapter validation (the live gate)
+
+Before the go-live flip, prove the real Kite adapter places, polls, and reports orders
+the way the contract test-suite assumes. **All read-only — you place any test order
+yourself in Kite; no script here initiates a trade.**
+
+1. **Connectivity + permissions:** `python scripts/diag_kite_endpoints.py` — profile,
+   ltp, margins, positions, holdings, orders should all print `[OK]`. A `[FAIL]` here is
+   an account / subscription / permission issue, not a code one.
+2. **Adapter read path:** `python scripts/verify_broker_adapter.py` — confirms the
+   adapter wrapper (not just raw Kite) returns usable margins/positions/quotes/orders.
+3. **Live order → fill → book path:** place a **1-lot** order in the Kite app (or a tiny
+   LIMIT far from the market that you then cancel). Copy its order_id and run
+   `python scripts/verify_broker_adapter.py <ORDER_ID>`. The printed
+   `reduce → normalize → close_books_fully` verdict must match what you see in Kite
+   (COMPLETE + full qty → books a close; partial / cancelled → does **not** book). This
+   is the same pure reduction the executor uses and that `tests/test_broker_contract.py`
+   pins, so a match means the live fill-truth path is trustworthy.
+4. Only once 1–3 are green is the order path proven for the flip below.
+
 ## Go-live checklist (when ready — no rush; paper today)
 
 Live trading is fail-closed and gated by the pre-live readiness check. Before flipping:
 
-1. **Implement the real Kite broker adapter** — `broker/kite_adapter.py` order/positions/historical/websocket methods are still stubs (the hard gate; also unblocks the #28 streaming ticker).
+1. **Validate the real Kite adapter** — run the *Broker adapter validation* steps above until green. The adapter methods are thin Kite SDK pass-throughs; this proves they place/poll/report correctly live (and exercises the path the #28 streaming ticker will reuse).
 2. Set `compliance.algo_id`, `compliance.static_ip`, `exchange_registered` in `config/system.yaml`; whitelist the static IP at Kite (SEBI-2026, P9).
 3. Rotate the previously-leaked secrets; set `TOKEN_ENCRYPTION_KEY`, a real `POSTGRES_PASSWORD`, and `REDIS_PASSWORD`.
 4. Reset the kill switch; ensure no stale open positions.
