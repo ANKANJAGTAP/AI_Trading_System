@@ -73,7 +73,7 @@ These are the only things that stand between "paper on AWS" and "transacting rea
 ## 8. Testing expansion
 
 - ✅ **#41 property-based risk tests** — `tests/test_invariants.py` sweeps sizing caps, the entry/exit gate, tick + instrument-meta validators (no new dependency).
-- ⬜ **#37 Broker-adapter contract tests** (pairs with the live adapter) · **#38 e2e paper replay** · **#39 broker-mock lifecycle sim** · **#40 chaos tests**.
+- ✅ **#37 broker-adapter contract tests** + ✅ **#39 broker-mock lifecycle sim** — `broker/mock_broker.py` (scriptable Kite-shaped lifecycle, no SDK/DB) + `tests/test_broker_contract.py` pin the fill-truth/entry-lifecycle contract the real adapter must satisfy. · ⬜ **#38 e2e paper replay** (can reuse the mock) · **#40 chaos tests**.
 
 ## 9. Docs & cleanup
 
