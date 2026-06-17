@@ -17,6 +17,8 @@ historical option chain are the remaining, data-dependent half of #23.
 """
 from __future__ import annotations
 
+import math
+
 INF = float("inf")
 
 
@@ -67,3 +69,16 @@ def leg_fill(side: str, bid: float, ask: float, oi=None, volume=None, *,
     return {"tradable": True, "reason": "ok",
             "fill_price": option_fill_price(side, bid, ask, slippage_frac=slippage_frac),
             "spread_pct": round(sp, 4)}
+
+
+def synthetic_spread_pct(spot: float, strike: float, dte_days: float, iv: float,
+                         *, base: float = 0.01) -> float:
+    """Estimate an option's relative bid-ask spread when no real chain is available
+    (#23): spreads widen for OTM strikes (|log-moneyness|), short DTE, and high IV.
+    A structural stand-in for a real historical chain — it makes BS-model backtests
+    pay realistically more to cross OTM / near-expiry legs. Returns a premium fraction,
+    capped at 50%."""
+    moneyness = abs(math.log(strike / spot)) if spot > 0 and strike > 0 else 0.0
+    dte = max(0.5, float(dte_days or 0.0))
+    spread = base * (1 + 4.0 * moneyness) * (1 + 2.0 / math.sqrt(dte)) * (1 + max(0.0, float(iv or 0.0)))
+    return round(min(spread, 0.5), 4)

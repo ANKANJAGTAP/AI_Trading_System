@@ -12,13 +12,23 @@ function icon(s: string) {
   return <XCircle size={15} />;
 }
 
+// #32 operational tiles use ok/warn/down (vs the checklist's pass/warn/fail).
+const OKCOLOR: Record<string, string> = { ok: "var(--long)", warn: "var(--warn)", down: "var(--short)" };
+function okIcon(s: string) {
+  if (s === "ok") return <CheckCircle2 size={15} />;
+  if (s === "warn") return <AlertTriangle size={15} />;
+  return <XCircle size={15} />;
+}
+
 export function PreLiveReadiness() {
   const cl = useQuery({ queryKey: ["prelive"], queryFn: () => api.prelive(), refetchInterval: 15000 });
   const health = useQuery({ queryKey: ["health"], queryFn: () => api.health(), refetchInterval: 8000 });
+  const ready = useQuery({ queryKey: ["readiness"], queryFn: () => api.readiness(), refetchInterval: 15000 });
 
   const overall: string = cl.data?.overall ?? "…";
   const checks: any[] = cl.data?.checks ?? [];
   const h: any = health.data ?? {};
+  const tiles: any[] = ready.data?.tiles ?? [];
 
   return (
     <div className="flex h-full flex-col">
@@ -74,6 +84,38 @@ export function PreLiveReadiness() {
             </tbody>
           </table>
         </div>
+
+        <div className="mt-3 rounded-panel border bg-surface">
+          <div className="border-b px-3 py-1.5 eyebrow">Operational readiness · {tiles.length}</div>
+          <table className="w-full text-dense">
+            <thead className="text-text-lo">
+              <tr>
+                <th className="w-8 px-3 py-1 text-left eyebrow"></th>
+                <th className="px-3 py-1 text-left eyebrow">tile</th>
+                <th className="px-3 py-1 text-left eyebrow">detail</th>
+              </tr>
+            </thead>
+            <tbody>
+              {tiles.map((t: any) => (
+                <tr key={t.key} className="border-b border-line">
+                  <td className="px-3 py-1.5" style={{ color: OKCOLOR[t.status] ?? "var(--text-lo)" }}>
+                    {okIcon(t.status)}
+                  </td>
+                  <td className="px-3 py-1.5 text-text-hi">{t.label}</td>
+                  <td className="px-3 py-1.5 text-micro text-text-lo">{t.detail}</td>
+                </tr>
+              ))}
+              {tiles.length === 0 && (
+                <tr>
+                  <td colSpan={3} className="px-3 py-2 text-text-faint">
+                    Loading readiness…
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+
         <p className="mt-3 text-micro text-text-faint">
           A live flip is blocked until <span className="text-text-lo">overall = pass</span>. Set algo_id + static_ip,
           whitelist the IP at Kite, reset the kill-switch, then re-check. (See COMPLIANCE.md.)

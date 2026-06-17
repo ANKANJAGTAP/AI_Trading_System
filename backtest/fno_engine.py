@@ -80,10 +80,18 @@ def slippage_cost(legs: list[tuple], qty: int, spot: float, dte_days: float, iv:
     and low-DTE, so this is the single biggest correction to a BS-model backtest."""
     if slip_pct <= 0:
         return 0.0
+    # #23: spread-aware haircut. Instead of one flat slip_pct on every leg, cross each
+    # leg by half its (synthetic) bid-ask spread — wider for OTM / short-DTE / high-IV
+    # legs — floored at the base slip. Structural stand-in until a real chain is wired.
+    from backtest.option_fills import synthetic_spread_pct
     t = max(0.0, dte_days) / 365.0
-    turnover = sum(entry_px + bs_price(spot, strike, t, _R, iv, opt)
-                   for opt, strike, _side, entry_px in legs)
-    return turnover * qty * (slip_pct / 100.0)
+    base = slip_pct / 100.0
+    total = 0.0
+    for opt, strike, _side, entry_px in legs:
+        leg_prem = entry_px + bs_price(spot, strike, t, _R, iv, opt)
+        leg_slip = max(base, synthetic_spread_pct(spot, strike, dte_days, iv) / 2.0)
+        total += leg_prem * leg_slip
+    return total * qty
 
 
 async def run_fno_backtest(params, cfg) -> dict:

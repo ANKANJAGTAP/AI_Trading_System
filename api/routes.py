@@ -79,6 +79,14 @@ async def get_prelive():
     return await services.prelive_checklist()
 
 
+@router.get("/readiness")
+async def get_readiness():
+    # #32: operational readiness tiles (pending commands, open positions, entry block,
+    # feed, backup) + an overall roll-up the dashboard gates the live flip on.
+    from api import readiness as readiness_svc
+    return await readiness_svc.readiness_summary()
+
+
 @router.get("/market")
 async def get_market():
     return await marketdata.market()

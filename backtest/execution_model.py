@@ -79,3 +79,38 @@ def resolve_intrabar_exit(side: str, stop: float | None, target: float | None,
     if tgt_hit:
         return "target", target_fill_price(side, target, o)
     return None, None
+
+
+# --------------------------------------------------------------- #25 order realism
+def price_band_breached(price: float, reference: float, band_pct: float = 0.20) -> bool:
+    """Exchange daily price band / circuit: an order priced beyond ±band_pct of the
+    reference (prior close) is rejected by the exchange. True = would be rejected.
+    Unknown/zero inputs -> not breached (can't judge -> don't fabricate a rejection)."""
+    if not reference or reference <= 0 or not price or price <= 0:
+        return False
+    return abs(price - reference) / reference > band_pct
+
+
+def freeze_slices(quantity, freeze_qty) -> list[int]:
+    """Split an order above the exchange FREEZE limit into freeze-compliant child
+    orders (F&O quantity freeze — a single order over the cap is rejected outright).
+    Returns the list of child quantities (sums back to `quantity`)."""
+    q = int(quantity or 0)
+    if q <= 0:
+        return []
+    if not freeze_qty or freeze_qty <= 0 or q <= int(freeze_qty):
+        return [q]
+    cap = int(freeze_qty)
+    full, rem = divmod(q, cap)
+    slices = [cap] * full
+    if rem:
+        slices.append(rem)
+    return slices
+
+
+def rate_limit_ok(orders_in_window: int, max_per_window: int) -> bool:
+    """Throttle gate: False once the per-window order budget is spent (broker/exchange
+    OPS rate limits). max<=0 means unlimited."""
+    if not max_per_window or max_per_window <= 0:
+        return True
+    return orders_in_window < max_per_window

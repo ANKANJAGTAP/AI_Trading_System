@@ -13,6 +13,7 @@ from common.logging import get_logger
 from common.market_time import now_ist
 from backtest.engine import BacktestParams, run_backtest
 from backtest.sweep import report_from_results
+from backtest.provenance import config_fingerprint
 from config.loader import get_config
 
 MAX_SWEEP_CONFIGS = 12          # each config is a full backtest — keep a sweep bounded
@@ -39,7 +40,8 @@ async def start_run(sleeve: str, symbols: list[str], from_date: str, to_date: st
         "INSERT INTO backtest_runs (sleeve, symbols, from_dt, to_dt, params, status) "
         "VALUES ($1,$2,$3,$4,$5::jsonb,'running') RETURNING id",
         sleeve, symbols, from_dt, to_dt,
-        json.dumps({"starting_capital": starting_capital, "per_trade_pct": per_trade_pct}))
+        json.dumps({"starting_capital": starting_capital, "per_trade_pct": per_trade_pct,
+                    "config_fingerprint": config_fingerprint(get_config().model_dump())}))
     run_id = row["id"]
     params = BacktestParams(symbols=symbols, from_dt=from_dt, to_dt=to_dt, sleeve=sleeve,
                             starting_capital=starting_capital, per_trade_pct=per_trade_pct)
@@ -167,4 +169,5 @@ async def run_sweep(sleeve: str, symbols: list[str], from_date: str, to_date: st
 
     report = report_from_results(results, starting_capital, n_splits=n_splits)
     report["trades_per_config"] = {k: len(v.get("trades", [])) for k, v in results.items()}
+    report["config_fingerprint"] = config_fingerprint(base.model_dump())   # #24 provenance
     return report

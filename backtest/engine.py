@@ -31,7 +31,7 @@ from research.features import signal_features
 from backtest.data_window import DataWindow
 from backtest.metrics import compute_metrics
 from backtest.sim_broker import BacktestBroker
-from backtest.execution_model import resolve_intrabar_exit
+from backtest.execution_model import price_band_breached, resolve_intrabar_exit
 
 
 def attach_discrimination(result: dict) -> dict:
@@ -180,6 +180,12 @@ async def run_backtest(params: BacktestParams, cfg=None) -> dict:
             if sized.rejected or sized.quantity <= 0:
                 continue
             entry_ref = float(df5.iloc[i + 1]["open"])   # fill at next bar open
+            # P25: an entry whose fill would breach the daily price band is rejected by
+            # the exchange — model the honest no-fill on a big gap instead of trading it.
+            ref_close = (float(df_day_upto["close"].iloc[-1])
+                         if df_day_upto is not None and not df_day_upto.empty else 0.0)
+            if price_band_breached(entry_ref, ref_close):
+                continue
             fill = broker.entry_fill(sig.side, entry_ref)
             qty = sized.quantity
             open_pos = {

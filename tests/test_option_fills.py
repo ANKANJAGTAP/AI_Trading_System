@@ -65,3 +65,17 @@ def test_leg_fill_rejects_illiquid_strike():
 def test_leg_fill_rejects_unusable_quote():
     r = leg_fill("BUY", 0.0, 10.0)                            # no real bid
     assert r["tradable"] is False and r["spread_pct"] == math.inf
+
+
+# ----------------------------------------------------- #23 synthetic spread model
+def test_synthetic_spread_widens_for_otm_short_dte_high_iv():
+    from backtest.option_fills import synthetic_spread_pct
+    atm = synthetic_spread_pct(20000, 20000, 30, 0.15)
+    otm = synthetic_spread_pct(20000, 21000, 30, 0.15)
+    assert otm > atm                                          # OTM strike -> wider
+    near = synthetic_spread_pct(20000, 20000, 2, 0.15)
+    far = synthetic_spread_pct(20000, 20000, 45, 0.15)
+    assert near > far                                         # short DTE -> wider
+    hi_iv = synthetic_spread_pct(20000, 20000, 30, 0.40)
+    assert hi_iv > atm                                       # high IV -> wider
+    assert synthetic_spread_pct(20000, 35000, 1, 5.0) <= 0.5  # capped

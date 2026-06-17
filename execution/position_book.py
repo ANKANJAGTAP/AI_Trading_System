@@ -196,6 +196,27 @@ class PositionBook:
         except Exception as exc:
             log.warning("position_event_persist_failed", error=str(exc))
 
+    async def rebuild_from_events(self, position_id: int) -> dict:
+        """#17: reconstruct a position purely from its append-only event log and
+        reconcile against the stored positions row (drift => investigate)."""
+        from execution.position_events import reconcile_position
+        rows = await fetch(
+            "SELECT id, event_type, filled_qty, avg_price, pending_qty, status, detail, ts "
+            "FROM position_events WHERE position_id=$1 ORDER BY ts, id", position_id)
+        events = []
+        for e in rows:
+            d = e["detail"]
+            if isinstance(d, str):
+                d = json.loads(d) if d else {}
+            events.append({"id": e["id"], "event_type": e["event_type"],
+                           "filled_qty": e["filled_qty"], "pending_qty": e["pending_qty"],
+                           "avg_price": e["avg_price"], "status": e["status"],
+                           "detail": d or {}, "ts": e["ts"]})
+        row = await fetchrow("SELECT quantity, status FROM positions WHERE id=$1", position_id)
+        stored_qty = int(row["quantity"]) if row and row["quantity"] is not None else 0
+        stored_status = row["status"] if row else None
+        return reconcile_position(events, stored_qty, stored_status)
+
     async def mark_close_pending(self, position_id: int, broker_order_id: str | None,
                                  detail: str = "") -> None:
         """A live exit that didn't cleanly complete: park the position in CLOSE_PENDING

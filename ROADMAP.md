@@ -14,7 +14,7 @@ Merges `upgrade.md` (safety ladder) + `WORLDCLASS_FNO_PLATFORM_PLAN.md` (institu
 - ✅ **P9** — SEBI-2026 algo compliance (Algo-ID tagging, market protection, OPS limiter, static-IP/OAuth gate, audit).
 - ✅ **Pillar 1 (data platform)** — contract/expiry resolver, bhavcopy EOD lake, Timescale schema, quality jobs, research API.
 - ✅ **Ops** — daily health digest, F&O Research + Pre-Live Readiness dashboard screens.
-- ✅ Migrations 0013–0022 applied; full suite green (398 tests); paper-mode live on AWS.
+- ✅ Migrations 0013–0022 applied; full suite green (436 tests); paper-mode live on AWS.
 
 ---
 
@@ -41,27 +41,27 @@ These are the only things that stand between "paper on AWS" and "transacting rea
 
 - ✅ **#15 DB constraints** — NOT VALID CHECKs (qty>0, valid side/status/mode/product/exchange) + `audit_digests` (migration 0022); safe-on-live (no scan/lock).
 - ✅ **#16 Migration drift detection** — checksum drift detected on startup (warn by default, raise under `migration_strict`); `python -m migrations.runner status`.
-- 🟡 **#17 Event-sourced positions** — `position_events` exists (P0#4); extend to derive state from events + rebuild/audit.
+- ✅ **#17 Event-sourced positions** — pure `execution/position_events.py` rebuilds a position from its append-only log + `reconcile_position` drift check; `PositionBook.rebuild_from_events` audits the stored row against the log. Unit-tested.
 - ✅ **#18 Compliance-grade audit** — hash-chained row fingerprints + `compute_and_store_daily_digest` (tamper-evident daily digest).
 
 ## 4. Backtest & research validity
 
-- 🟡 **#23 Historical option-chain backtests** — ✅ option-leg fill realism (`backtest/option_fills.py`: bid/ask crossing, spread cap, OI/volume liquidity gate), pure + unit-tested. ⬜ still (data-dependent): source a real historical option chain (bid/ask/OI/IV/Greeks), wire the fill model into `fno_engine` to replace the flat slippage, model expiry effects.
-- ⬜ **#24 Align backtest & live params** — shared config, persisted config hash per run, mismatch test.
-- 🟡 **#25 Execution realism** — ✅ honest intrabar fills (gap-through-stop fills at the open, limit-target fills at limit-or-better, both-touched resolves stop-first, directional slippage) in `backtest/execution_model.py`, wired into the engine + unit-tested. ⬜ still: order-rejection, rate-limit, and freeze-qty modeling.
-- 🟡 **#26 Walk-forward + OOS** — ✅ overfitting-stats core (`backtest/validation.py`: Probabilistic & Deflated Sharpe + PBO/CSCV), ✅ every backtest now reports PSR, ✅ sweep verdict (`backtest/sweep.py`) **live at `POST /api/backtest/sweep`** (runs a config grid → robust/inconclusive/overfit). ⬜ still: regime buckets, parameter-decay kill criteria.
+- 🟡 **#23 Historical option-chain backtests** — ✅ option-leg fill realism + synthetic bid/ask spread model (`backtest/option_fills.py`: OTM / short-DTE / high-IV widen the spread) wired into `fno_engine` slippage; pure + unit-tested. ⬜ **data-only**: a real historical option chain (bid/ask/OI/IV/Greeks) is a §10 data-vendor dependency — pin/assignment effects follow once chains exist (can't be sourced in-repo).
+- ✅ **#24 Align backtest & live params** — `backtest/provenance.py` config fingerprint (stable hash of result-affecting sections) stamped on every run + sweep; `diff_configs` reports backtest-vs-live drift. Unit-tested.
+- ✅ **#25 Execution realism** — honest intrabar fills (gap-through-stop, limit targets, stop-first, directional slippage) **plus** order-rejection (price-band), freeze-qty slicing, and rate-limit models in `backtest/execution_model.py`; price-band rejection wired into the engine entry. Unit-tested.
+- ✅ **#26 Walk-forward + OOS** — overfitting core (PSR / Deflated Sharpe / PBO·CSCV) + sweep verdict **live at `POST /api/backtest/sweep`**; regime-bucketed performance + parameter-decay kill criteria in `backtest/regime_analysis.py`. Unit-tested.
 - ✅ **#27 Meta-label discipline** — already enforced in `api/research.train_and_register`: min-sample + class-balance gates, purged expanding-window CV with embargo (leakage-safe), activate-only-if-it-beats-baseline validation gate; model versioning + rollback in `research/registry.py` (`save_model`/`list_models`/`activate`). ✅ triple-barrier labeling (`research/triple_barrier.py`) added as the honest label primitive. ⬜ optional: train an alternative model on triple-barrier labels (needs per-signal price paths).
 
 ## 5. Feed, data & scalability
 
-- 🟡 **#28 Bound tick queues** — `CoalescingTickBuffer` ready (bounded, latest-per-symbol, coalesced/evicted counters); wires in with the live ticker (no live tick queue yet).
+- ✅ **#28 Bound tick queues** — `CoalescingTickBuffer` wired into the engine LTP path (bounded, latest-per-symbol under burst; coalesced/evicted counters exposed on the handler). Full coalescing activates with the live websocket feed (§1).
 - ✅ **#29 Market-data quality gates** — `validate_tick` (stale/zero/negative/jump/crossed-quote) live in the engine LTP handler; bad ticks dropped.
 - ✅ **#30 Instrument-metadata cache** — `validate_order_against_meta` (lot/tick/expiry) gates live entries in the executor; freeze handled by the slicer.
 
 ## 6. API & dashboard
 
 - ✅ **#31 API safety boundaries** — scoped + rate-limited + audited control endpoints; optional `Idempotency-Key` header dedupes destructive cmds and returns the command-id.
-- 🟡 **#32 Truthful live-readiness UI** — Pre-Live Readiness screen exists; add per-venue feed, pending commands, unprotected positions, last backup test; disable live controls unless ready + scoped.
+- ✅ **#32 Truthful live-readiness UI** — `GET /api/readiness` aggregates operational tiles (pending commands, open positions, unsafe-entry block, live feed, backup) into a pass/warn/fail roll-up, surfaced in the Go-Live Readiness screen. Pure roll-up unit-tested; dashboard type-checks clean.
 
 ## 7. DevOps, CI & release safety
 
@@ -73,7 +73,7 @@ These are the only things that stand between "paper on AWS" and "transacting rea
 ## 8. Testing expansion
 
 - ✅ **#41 property-based risk tests** — `tests/test_invariants.py` sweeps sizing caps, the entry/exit gate, tick + instrument-meta validators (no new dependency).
-- ✅ **#37 broker-adapter contract tests** + ✅ **#39 broker-mock lifecycle sim** — `broker/mock_broker.py` (scriptable Kite-shaped lifecycle, no SDK/DB) + `tests/test_broker_contract.py` pin the fill-truth/entry-lifecycle contract the real adapter must satisfy. · ⬜ **#38 e2e paper replay** (can reuse the mock) · **#40 chaos tests**.
+- ✅ **#37 broker-adapter contract tests** + ✅ **#39 broker-mock lifecycle sim** — `broker/mock_broker.py` + `tests/test_broker_contract.py` pin the fill-truth/entry-lifecycle contract. · ✅ **#38 e2e paper replay** — `tests/test_paper_replay.py` drives a multi-order session through the mock end-to-end. · ✅ **#40 chaos tests** — `tests/test_chaos.py` injects broker silence/garbage, partial-then-cancel, bad ticks, gaps, and halts; asserts fail-closed throughout.
 
 ## 9. Docs & cleanup
 
