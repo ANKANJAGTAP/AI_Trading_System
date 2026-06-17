@@ -8,6 +8,7 @@ environment / `.env`.
 from __future__ import annotations
 
 from functools import lru_cache
+from urllib.parse import quote
 
 from pydantic import computed_field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -26,6 +27,7 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     log_json: bool = False                # JSON logs in prod, console in dev
     config_dir: str = "config"            # where the *.yaml tunables live
+    migration_strict: bool = False        # #16: fail startup on migration drift (else warn)
 
     # --- PostgreSQL / TimescaleDB ---
     postgres_host: str = "localhost"
@@ -38,6 +40,7 @@ class Settings(BaseSettings):
     redis_host: str = "localhost"
     redis_port: int = 6379
     redis_db: int = 0
+    redis_password: str = ""              # empty => no auth (local dev). Set in prod.
 
     # --- Zerodha Kite Connect ---
     kite_api_key: str = ""
@@ -69,6 +72,13 @@ class Settings(BaseSettings):
     # When set, every /api/* route and the /ws stream require Authorization:
     # "Bearer <token>". Leave empty ONLY for a trusted, localhost-bound dev box.
     api_auth_token: str = ""
+    # Optional scoped tokens (#19; opt-in). Each grants its level and below
+    # (read < operator < trader < admin). When only api_auth_token is set it acts
+    # as ADMIN, so the single-token setup stays backward-compatible.
+    api_token_readonly: str = ""
+    api_token_operator: str = ""
+    api_token_trader: str = ""
+    api_token_admin: str = ""
     # Comma-separated allowed CORS origins. "*" = any (dev). In prod set to the
     # dashboard origin(s), e.g. "https://aegis.example.com".
     cors_allow_origins: str = "*"
@@ -76,15 +86,20 @@ class Settings(BaseSettings):
     @computed_field  # type: ignore[prop-decorator]
     @property
     def database_dsn(self) -> str:
+        # URL-encode creds so passwords with @ : / etc. don't corrupt the DSN.
+        user = quote(self.postgres_user, safe="")
+        pw = quote(self.postgres_password, safe="")
         return (
-            f"postgresql://{self.postgres_user}:{self.postgres_password}"
+            f"postgresql://{user}:{pw}"
             f"@{self.postgres_host}:{self.postgres_port}/{self.postgres_db}"
         )
 
     @computed_field  # type: ignore[prop-decorator]
     @property
     def redis_url(self) -> str:
-        return f"redis://{self.redis_host}:{self.redis_port}/{self.redis_db}"
+        # Opt-in auth: empty password => no userinfo (unchanged dev behavior).
+        auth = f":{quote(self.redis_password, safe='')}@" if self.redis_password else ""
+        return f"redis://{auth}{self.redis_host}:{self.redis_port}/{self.redis_db}"
 
 
 @lru_cache

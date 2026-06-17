@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from pathlib import Path
 
 from cryptography.fernet import Fernet
@@ -61,3 +62,10 @@ class TokenStore:
         if data and data.get("date") == _today_ist() and data.get("access_token"):
             return data["access_token"]
         return None
+
+    def age_seconds(self) -> float | None:
+        """Seconds since the token file was last written (None if absent). Feeds the
+        pre-live token-freshness check (#21)."""
+        if not self.path.exists():
+            return None
+        return max(0.0, time.time() - self.path.stat().st_mtime)

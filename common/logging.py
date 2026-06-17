@@ -10,9 +10,15 @@ import sys
 
 import structlog
 
+from common.secrets import redact_event
 from config.settings import get_settings
 
 _configured = False
+
+
+def _redact_processor(_logger, _method, event_dict):
+    """structlog processor (#21): scrub values of secret-looking keys before render."""
+    return redact_event(event_dict)
 
 
 def configure_logging() -> None:
@@ -29,6 +35,7 @@ def configure_logging() -> None:
         structlog.processors.StackInfoRenderer(),
         structlog.processors.format_exc_info,
     ]
+    processors.append(_redact_processor)  # scrub secret-looking fields (#21)
     processors.append(
         structlog.processors.JSONRenderer()
         if s.log_json

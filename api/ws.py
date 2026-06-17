@@ -6,10 +6,10 @@ from __future__ import annotations
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
+from api.auth import READ, configured_tokens, level_for, ws_token_from
 from common.events import EVENTS_CHANNEL
 from common.logging import get_logger
 from common.redis_client import get_redis
-from config.settings import get_settings
 
 log = get_logger("api_ws")
 router = APIRouter()
@@ -17,17 +17,21 @@ router = APIRouter()
 
 @router.websocket("/ws")
 async def ws_events(websocket: WebSocket) -> None:
-    # Auth: when API_AUTH_TOKEN is set, require it as ?token= or a Bearer header.
-    token = get_settings().api_auth_token
-    if token:
-        supplied = websocket.query_params.get("token")
-        if not supplied:
-            auth = websocket.headers.get("authorization", "")
-            supplied = auth[7:] if auth.startswith("Bearer ") else None
-        if supplied != token:
+    # Auth (#20): prefer the Authorization header or the Sec-WebSocket-Protocol
+    # subprotocol ("bearer,<token>"); the ?token= query param still works but is
+    # deprecated (it leaks via logs/proxies/history) and its value is never logged.
+    tokens = configured_tokens()
+    subprotocol = None
+    if tokens:
+        supplied, source = ws_token_from(dict(websocket.headers), dict(websocket.query_params))
+        if level_for(supplied, tokens) < READ:
             await websocket.close(code=1008)
             return
-    await websocket.accept()
+        if source == "subprotocol":
+            subprotocol = "bearer"   # must echo the negotiated subprotocol back
+        elif source == "query":
+            log.warning("ws_token_in_query_deprecated", hint="use subprotocol/header")
+    await websocket.accept(subprotocol=subprotocol)
     r = await get_redis()
     pubsub = r.pubsub()
     await pubsub.subscribe(EVENTS_CHANNEL)

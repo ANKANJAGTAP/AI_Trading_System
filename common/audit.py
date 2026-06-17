@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 import uuid
 
-from common.db import execute, fetchrow
+from common.db import execute, fetch, fetchrow
 
 
 def new_correlation_id() -> str:
@@ -24,6 +24,31 @@ async def audit(event_type: str, component: str, message: str = "",
         uuid.UUID(correlation_id) if correlation_id else None,
         event_type, component, message, json.dumps(payload or {}),
     )
+
+
+async def compute_and_store_daily_digest(trade_date) -> str:
+    """#18: fold a day's audit_log rows into a tamper-evident sha256 hash-chain,
+    chained to the prior day's digest, and upsert into audit_digests. Returns the
+    digest. Meant to run once daily (NOT on the audit write path)."""
+    from common.audit_chain import chain_digest
+    rows = await fetch(
+        "SELECT id, ts, event_type, component, message, payload FROM audit_log "
+        "WHERE ts::date = $1 ORDER BY ts, id", trade_date)
+    prev = await fetchrow(
+        "SELECT digest FROM audit_digests WHERE trade_date < $1 "
+        "ORDER BY trade_date DESC LIMIT 1", trade_date)
+    prev_digest = prev["digest"] if prev else None
+    items = [{"id": r["id"], "ts": r["ts"].isoformat(), "event_type": r["event_type"],
+              "component": r["component"], "message": r["message"], "payload": r["payload"]}
+             for r in rows]
+    digest, n = chain_digest(items, prev_digest)
+    await execute(
+        "INSERT INTO audit_digests (trade_date, row_count, digest, prev_digest) "
+        "VALUES ($1, $2, $3, $4) ON CONFLICT (trade_date) DO UPDATE SET "
+        "row_count = EXCLUDED.row_count, digest = EXCLUDED.digest, "
+        "prev_digest = EXCLUDED.prev_digest, created_at = now()",
+        trade_date, n, digest, prev_digest)
+    return digest
 
 
 async def persist_signal(sleeve: str, instrument: dict, decision: str, confidence: float,

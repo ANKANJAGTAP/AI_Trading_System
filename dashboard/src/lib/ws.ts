@@ -8,15 +8,21 @@ let manualClose = false;
 
 function wsUrl(): string {
   const proto = location.protocol === "https:" ? "wss" : "ws";
-  const tok = typeof localStorage !== "undefined" ? localStorage.getItem("aegis.token") : null;
-  return `${proto}://${location.host}/ws${tok ? `?token=${encodeURIComponent(tok)}` : ""}`;
+  return `${proto}://${location.host}/ws`;
+}
+
+// Token travels in the Sec-WebSocket-Protocol subprotocol ("bearer,<token>"),
+// never the query string — keeps it out of logs/proxies/browser history (#20).
+function wsToken(): string | null {
+  return typeof localStorage !== "undefined" ? localStorage.getItem("aegis.token") : null;
 }
 
 export function connectWs(): void {
   manualClose = false;
   useStore.getState().setConnection("connecting");
   try {
-    socket = new WebSocket(wsUrl());
+    const tok = wsToken();
+    socket = tok ? new WebSocket(wsUrl(), ["bearer", tok]) : new WebSocket(wsUrl());
   } catch {
     scheduleReconnect();
     return;

@@ -10,7 +10,9 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-ats}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ats}
     ports:
-      - "${POSTGRES_HOST_PORT:-5544}:5432"
+      # Bound to localhost by default (defense-in-depth; never publish the DB on
+      # all interfaces). Container-to-container still uses timescaledb:5432.
+      - "${DB_BIND_ADDR:-127.0.0.1}:${POSTGRES_HOST_PORT:-5544}:5432"
     volumes:
       - tsdb_data:/var/lib/postgresql/data
     healthcheck:
@@ -22,13 +24,22 @@ services:
 
   redis:
     image: redis:7-alpine
-    command: ["redis-server", "--appendonly", "yes"]
+    environment:
+      # Opt-in auth: set REDIS_PASSWORD in .env to require a password. Empty =>
+      # no auth (unchanged dev behavior). $$ escapes interpolation so the value
+      # is expanded by the container shell at runtime, not by compose.
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+    command:
+      - sh
+      - -c
+      - redis-server --appendonly yes $${REDIS_PASSWORD:+--requirepass "$$REDIS_PASSWORD"}
     ports:
-      - "${REDIS_HOST_PORT:-6399}:6379"
+      # Bound to localhost by default — never publish Redis on all interfaces.
+      - "${REDIS_BIND_ADDR:-127.0.0.1}:${REDIS_HOST_PORT:-6399}:6379"
     volumes:
       - redis_data:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD-SHELL", "redis-cli $${REDIS_PASSWORD:+-a \"$$REDIS_PASSWORD\"} ping | grep -q PONG"]
       interval: 5s
       timeout: 5s
       retries: 12

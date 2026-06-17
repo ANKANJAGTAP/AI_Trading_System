@@ -151,8 +151,28 @@ async def _sebi_compliance():
     return (PASS, "order tag + static IP + market protection + OPS<=10 configured")
 
 
+async def _token_security():
+    """#21: token encryption-at-rest policy + broker-token freshness (read-only).
+    Fails closed in live only when a non-dev env has no encryption key — paper is
+    unaffected (this probe gates arming live, never startup)."""
+    from broker.token_store import TokenStore
+    from common.secrets import token_security_ok
+    from config.settings import get_settings
+    s = get_settings()
+    ok, msg = token_security_ok(s.env, bool(s.token_encryption_key))
+    if not ok:
+        return (FAIL, msg, {"env": s.env})
+    age = TokenStore(s.token_store_path, s.token_encryption_key).age_seconds()
+    if age is None:
+        return (WARN, f"{msg}; no token file yet", {"age_s": None})
+    stale = age > 86400  # Kite tokens are daily; >1 day is stale.
+    return (WARN if stale else PASS, f"{msg}; token age {int(age)}s",
+            {"age_s": int(age), "stale": stale})
+
+
 _CHECKS = [
     ("broker_token", _broker_token),
+    ("token_security", _token_security),
     ("broker_reachable", _broker_reachable),
     ("market_data_feed", _market_data_feed),
     ("order_dry_run", _order_dry_run),

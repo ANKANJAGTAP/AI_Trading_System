@@ -4,13 +4,14 @@ commands (flatten/close/modify). Every action is audited and guarded.
 """
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
 from api import analytics as analytics_svc
 from api import backtest as backtest_svc
 from api import fno_lake as fno_lake_svc
 from api import marketdata, research as research_svc, services
+from api.auth import ADMIN, OPERATOR, TRADER, rate_limit, require_scope
 from common.audit import audit
 from common.commands import enqueue_command
 from common.events import publish_event
@@ -112,7 +113,7 @@ class BacktestBody(BaseModel):
     per_trade_pct: float = 1.0
 
 
-@router.post("/backtest")
+@router.post("/backtest", dependencies=[Depends(require_scope(OPERATOR))])
 async def post_backtest(b: BacktestBody):
     res = await backtest_svc.start_run(b.sleeve, b.symbols, b.from_date, b.to_date,
                                        b.starting_capital, b.per_trade_pct)
@@ -154,7 +155,7 @@ async def get_research_discrimination():
     return await research_svc.discrimination()
 
 
-@router.post("/research/train")
+@router.post("/research/train", dependencies=[Depends(require_scope(OPERATOR))])
 async def post_research_train(b: TrainBody):
     res = await research_svc.train_and_register(b.name, b.min_samples)
     if res.get("error"):
@@ -163,7 +164,7 @@ async def post_research_train(b: TrainBody):
     return res
 
 
-@router.post("/research/activate/{model_id}")
+@router.post("/research/activate/{model_id}", dependencies=[Depends(require_scope(TRADER))])
 async def post_research_activate(model_id: int):
     return await research_svc.activate_model(model_id)
 
@@ -245,7 +246,7 @@ class ConfigEditBody(BaseModel):
     value: float
 
 
-@router.post("/controls/pause")
+@router.post("/controls/pause", dependencies=[Depends(require_scope(OPERATOR))])
 async def control_pause(b: PauseBody):
     await set_state("engine_paused", b.paused, "operator")
     await audit("control_pause", "api", f"paused={b.paused}", payload={"paused": b.paused})
@@ -253,7 +254,8 @@ async def control_pause(b: PauseBody):
     return {"ok": True, "paused": b.paused}
 
 
-@router.post("/controls/flatten")
+@router.post("/controls/flatten",
+             dependencies=[Depends(require_scope(TRADER)), Depends(rate_limit("flatten", 6, 60))])
 async def control_flatten(b: ConfirmBody):
     if not b.confirm:
         raise HTTPException(400, "flatten requires confirm=true")
@@ -262,7 +264,7 @@ async def control_flatten(b: ConfirmBody):
     return {"ok": True, "queued": True}
 
 
-@router.post("/controls/sleeve/{sleeve}")
+@router.post("/controls/sleeve/{sleeve}", dependencies=[Depends(require_scope(OPERATOR))])
 async def control_sleeve(sleeve: str, b: SleeveBody):
     await set_state(f"sleeve_{sleeve}_enabled", b.enabled, "operator")
     await audit("control_sleeve", "api", f"{sleeve} enabled={b.enabled}",
@@ -270,7 +272,8 @@ async def control_sleeve(sleeve: str, b: SleeveBody):
     return {"ok": True, "sleeve": sleeve, "enabled": b.enabled}
 
 
-@router.post("/controls/mode")
+@router.post("/controls/mode",
+             dependencies=[Depends(require_scope(ADMIN)), Depends(rate_limit("mode", 6, 60))])
 async def control_mode(b: ModeBody):
     # P0#1: all validation + the atomic write live in the transition service. Going
     # live is fail-closed (confirm token + inactive kill-switch + pre-live all-pass);
@@ -308,7 +311,8 @@ async def control_mode(b: ModeBody):
     return {"ok": True, "mode": new.mode, "version": new.version}
 
 
-@router.post("/controls/killswitch/reset")
+@router.post("/controls/killswitch/reset",
+             dependencies=[Depends(require_scope(ADMIN)), Depends(rate_limit("ks_reset", 6, 60))])
 async def control_ks_reset(b: ConfirmBody):
     if not b.confirm:
         raise HTTPException(400, "reset requires confirm=true")
@@ -321,7 +325,8 @@ async def control_ks_reset(b: ConfirmBody):
     return {"ok": True}
 
 
-@router.post("/positions/{position_id}/close")
+@router.post("/positions/{position_id}/close",
+             dependencies=[Depends(require_scope(TRADER)), Depends(rate_limit("close", 30, 60))])
 async def close_position(position_id: str, b: ConfirmBody):
     if not b.confirm:
         raise HTTPException(400, "close requires confirm=true")
@@ -330,7 +335,7 @@ async def close_position(position_id: str, b: ConfirmBody):
     return {"ok": True, "queued": True}
 
 
-@router.post("/positions/{position_id}/modify")
+@router.post("/positions/{position_id}/modify", dependencies=[Depends(require_scope(TRADER))])
 async def modify_position(position_id: str, b: ModifyBody):
     await enqueue_command({"type": "modify", "id": position_id, "stop": b.stop, "target": b.target})
     await audit("control_modify", "api", f"modify {position_id}", payload=b.model_dump())
@@ -340,7 +345,8 @@ async def modify_position(position_id: str, b: ModifyBody):
 _EDITABLE = {"risk.paper_per_trade_pct": (0.25, 2.0), "risk.paper_daily_max_loss_pct": (1.0, 6.0)}
 
 
-@router.put("/config")
+@router.put("/config",
+            dependencies=[Depends(require_scope(ADMIN)), Depends(rate_limit("config", 10, 60))])
 async def edit_config(b: ConfigEditBody):
     bounds = _EDITABLE.get(b.path)
     if bounds is None:
