@@ -538,7 +538,8 @@ async def _slow_loop(cfg, orchestrator, risk, md_service) -> None:
                 try:
                     bp = await md_service.governor.call("other", md_service.adapter.positions)
                     net = bp.get("net", []) if isinstance(bp, dict) else []
-                    await executor.book.reconcile(net, mode="live")
+                    from execution.reconciler import run_reconcile
+                    await run_reconcile(executor, net)         # P1#11: graded reconcile + persist + act
                     await executor.resolve_pending_closes()   # P0#4: finish CLOSE_PENDING exits
                     await executor.reconcile_brackets()        # P0#7: cancel orphaned GTTs
                     await (await get_redis()).set("aegis:feed:last_reconcile", now_ist().isoformat())
