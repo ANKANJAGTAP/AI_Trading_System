@@ -21,6 +21,7 @@ import pyotp
 import requests
 from kiteconnect import KiteConnect
 
+from common.errors import BrokerUnavailable
 from common.logging import get_logger
 
 log = get_logger("kite_auth")
@@ -99,7 +100,9 @@ def kite_auto_login(
         url = urljoin(url, location)
 
     if not request_token:
-        raise RuntimeError(
+        # #47: a broker-login runtime failure is a TradingError, so callers can
+        # guard the live path with a single `except TradingError`.
+        raise BrokerUnavailable(
             "Failed to obtain request_token from Kite login flow. For a new Kite "
             "Connect app, authorise it once in a browser (open the login URL, log "
             "in, approve access), then retry."

@@ -37,6 +37,7 @@ dumps/
 # ── Node (dashboard) ──
 dashboard/node_modules/
 dashboard/dist/
+*.tsbuildinfo
 
 # ── OS ──
 .DS_Store

@@ -78,7 +78,7 @@ These are the only things that stand between "paper on AWS" and "transacting rea
 ## 9. Docs & cleanup
 
 - ✅ **#43 runbooks** — `RUNBOOK.md` (deploy/rollback/backup-restore/kill-switch/health/secret-rotation/go-live). · ✅ **#44 risk-policy doc** — `RISK_POLICY.md` from `config/risk.yaml`.
-- ⬜ **#42 README-to-reality** · **#45 prune cache files** · **#46 typing at boundaries** · **#47 standard error types**.
+- ✅ **#42 README-to-reality** — status/blockers/tests/limitations corrected to current state. · ✅ **#45 cache prune** — `.gitignore` complete (incl. `*.tsbuildinfo`); nothing tracked to remove. · ✅ **#46 boundary typing** — every substantive module carries `from __future__ import annotations` (only empty `__init__.py` markers lack it). · ✅ **#47 standard error types** — `TradingError` hierarchy used across the mode/executor/broker live paths.
 
 ---
 

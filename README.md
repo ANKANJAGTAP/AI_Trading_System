@@ -2,7 +2,7 @@
 
 Real-time algorithmic trading platform for Indian markets. The project targets NSE/BSE equities, F&O, and MCX commodities through Zerodha Kite Connect, with a FastAPI control plane, asyncio engine, TimescaleDB storage, Redis state/commands, and a React operator dashboard.
 
-Important status: the system is useful for research, backtesting, simulation, paper-style `simulated_fill`, dashboards, and risk-engine development. It is **not live-production ready yet**. The live execution path exists, but the latest audit found several P0 safety gaps around mode switching, broker-fill accounting, partial fills, command durability, and live pre-flight checks. See [upgrade.md](upgrade.md) for the detailed hardening backlog.
+Important status: the system runs in **paper mode** today (`simulated_fill` — real signals and live/recorded prices, no real orders). The P0 live-safety gaps from the original audit (atomic mode switching, broker-fill accounting, partial-fill lifecycle, durable flatten/commands, executable pre-live checks) **have been closed**, along with the security, data-integrity, scalability, DevOps, and docs tiers. Live trading remains fail-closed and gated: the one hard blocker left is the real Kite broker order/positions/historical/websocket adapter (still a stub), after which backtest realism is where the edge gets validated. See [ROADMAP.md](ROADMAP.md) for the consolidated current backlog ([upgrade.md](upgrade.md) is the original audit).
 
 ## Current State
 
@@ -11,32 +11,34 @@ Important status: the system is useful for research, backtesting, simulation, pa
 | Core repo structure | Implemented | Modular backend, dashboard, migrations, scripts, tests |
 | Config system | Implemented | Pydantic settings plus YAML tunables |
 | Database schema | Implemented | TimescaleDB tables for market data, trading, audit, dashboard, research |
-| Broker adapter | Implemented | Kite adapter, token store, TOTP/login helpers, diagnostics |
+| Broker adapter | Login only | TOTP login + token store + diagnostics work; order/positions/historical/websocket methods are **stubs** (the live gate) |
 | Market data | Implemented | Instruments, historical data, candles, feed, indicators, option chain, IV history |
 | Strategy pipelines | Implemented | Intraday stocks, swing stocks, F&O, MCX intraday/swing |
 | Risk engine | Implemented | R-sizing, sleeve caps, portfolio caps, kill switch, brakes, heat |
-| Execution | Partially implemented | Simulated fill is stronger than live path; live path needs P0 hardening |
+| Execution | Paper hardened | `simulated_fill` is the default; the live path is fail-closed, P0-hardened (mode/exit/fill/partial/command), and gated on the real adapter |
 | F&O structures | Simulated implemented | Defined-risk structure lifecycle exists; live multi-leg execution is blocked |
 | Backtesting | Implemented | Equity, momentum, swing, F&O, walk-forward, metrics |
 | Research layer | Implemented | Trade journal, meta-labeler, feature extraction, discrimination reports |
 | API | Implemented | Health, controls, market data, analytics, backtest, research, websocket |
 | Dashboard | Implemented | React/Vite operator console |
-| Tests | Implemented | Current suite: `55 passed` |
-| Institutional live readiness | Not ready | See [upgrade.md](upgrade.md) |
+| Tests | Implemented | DB-free suite: `333 passed` (incl. property-style risk invariants) |
+| Institutional live readiness | Gated | P0/P1, security, data, scale, DevOps tiers done; remaining: real broker adapter + backtest realism. See [ROADMAP.md](ROADMAP.md) |
 
 ## Safety Warning
 
-Default mode is `simulated_fill`: real signals and live/recorded prices, but no real order in that mode. Live trading must remain disabled until the P0 items in [upgrade.md](upgrade.md) are fixed.
+Default mode is `simulated_fill`: real signals and live/recorded prices, but **no real order is ever sent** in that mode. Going live is fail-closed — it requires a confirm token, an inactive kill-switch, and an all-pass pre-live readiness check (`GET /api/prelive-checklist`), and is blocked otherwise.
 
-Known live blockers include:
+The original P0 live blockers have been addressed:
 
-- Runtime paper/live mode can diverge between executor, risk, capital, and kill-switch state.
-- Pre-live checklist is not yet a real executable broker/readiness proof.
-- Live exits currently need product-aware handling and broker-fill-based accounting.
-- Partial fills need cancellation/reconciliation lifecycle hardening.
-- Panic/flatten commands need durable acknowledgement and retry semantics.
-- Venue-aware feed/session safety, especially MCX after NSE close, needs hardening.
-- API/auth/secrets/infrastructure defaults need production hardening.
+- ✅ Atomic runtime mode across executor, risk, capital, and kill-switch (single source of truth).
+- ✅ Executable pre-live readiness checks that gate the go-live flip.
+- ✅ Product-aware live exits + broker-fill-based close accounting.
+- ✅ Partial-fill cancellation / reconciliation lifecycle.
+- ✅ Durable, acknowledged, idempotent panic/flatten commands.
+- ✅ Venue-aware session/feed safety and a broker reconciliation loop.
+- ✅ Production auth (scoped tokens), secret hardening, localhost-bound DB/Redis, CI, backups + restore drill.
+
+The remaining hard gate before any real capital: implement the real Kite broker adapter (`broker/kite_adapter.py` order/positions/historical/websocket are stubs). See the go-live checklist in [RUNBOOK.md](RUNBOOK.md) and the limits in [RISK_POLICY.md](RISK_POLICY.md).
 
 ## Architecture
 
@@ -972,7 +974,7 @@ PYTHONPATH=. python -m pytest tests -q
 Latest known result:
 
 ```text
-55 passed
+333 passed
 ```
 
 Additional verification scripts:
@@ -1032,18 +1034,13 @@ Secrets should stay in `.env` or an external secret manager. `.env`, `.secrets/`
 
 ## Current Main Limitations
 
-The latest audit produced [upgrade.md](upgrade.md). Highest-priority fixes:
+The original audit ([upgrade.md](upgrade.md)) has been worked down; the consolidated backlog is [ROADMAP.md](ROADMAP.md). What still genuinely blocks live capital:
 
-1. Atomic runtime mode state across API, executor, risk, capital, and kill switch.
-2. Executable pre-live readiness checks.
-3. Mode/account-scoped positions, capital, and P&L.
-4. Product-aware live exits.
-5. Broker-fill-based live close accounting.
-6. Partial-fill cancellation and reconciliation.
-7. Durable acknowledged panic/flatten commands.
-8. Broker reconciliation loop.
-9. Venue-aware session/feed watchdog.
-10. Production-grade auth, secrets, Redis/Postgres exposure, CI, backups, and restore tests.
+1. **Real Kite broker adapter** — order placement, positions, historical data, and the streaming websocket in `broker/kite_adapter.py` are stubs. This is the hard gate (and unblocks the live tick feed and broker contract tests).
+2. **Backtest realism** — historical option-chain backtests with real bid/ask/OI/IV/Greeks, execution realism (slippage/gap/rejection), walk-forward + OOS, and meta-label discipline (ROADMAP §4 / §10). This is where the edge is actually validated.
+3. **SEBI-2026 go-live config** — set `compliance.algo_id`/`static_ip`, whitelist the static IP at Kite, and rotate the previously-exposed secrets before flipping.
+
+Everything else from the audit (mode atomicity, pre-live checks, scoped P&L, product-aware exits, broker-fill accounting, partial fills, durable commands, reconciliation, session watchdog, auth/secrets/infra/CI/backups) is implemented.
 
 ## GitHub
 
@@ -1053,9 +1050,5 @@ Remote repository:
 https://github.com/ANKANJAGTAP/AI_Trading_System.git
 ```
 
-Current initial commit:
-
-```text
-e850b34 first commit
-```
+The `main` branch is the source of truth; the server is rebuilt from source on deploy (see [RUNBOOK.md](RUNBOOK.md) and `scripts/deploy.sh`).
 
