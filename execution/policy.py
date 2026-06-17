@@ -1,6 +1,8 @@
 """Pure execution-policy helpers — no I/O, safe to import anywhere (incl. tests)."""
 from __future__ import annotations
 
+from common.instrument_meta import validate_order_against_meta
+
 # P0#3: (exchange, product) pairs we can correctly place AND exit live. Anything
 # outside this set fails closed — at entry (don't open what we can't exit) and at
 # exit (don't blind-fire an MIS market order on a CNC/NRML position).
@@ -68,3 +70,22 @@ def live_structures_block_reason(mode: str, enabled: bool) -> str | None:
     if not enabled:
         return "F&O structures are paper-only (set execution.fno_live_structures_enabled to enable)"
     return "live F&O structures enabled in config but not implemented (fail-closed)"
+
+
+def entry_meta_block_reason(mode: str, quantity, price, inst: dict | None,
+                            order_type: str) -> str | None:
+    """P2#30: instrument-metadata gate for a LIVE entry — lot multiple, tick
+    alignment (LIMIT only), and expiry. Sim is never gated. Freeze-quantity is
+    handled by the executor's slicer, so it is intentionally NOT checked here.
+    Returns a reason to reject, or None to allow."""
+    if mode != "live":
+        return None
+    m = inst or {}
+    chk = validate_order_against_meta(
+        quantity=quantity,
+        price=price if order_type == "LIMIT" else None,
+        lot_size=m.get("lot_size"),
+        tick_size=m.get("tick_size"),
+        expiry=m.get("expiry"),
+    )
+    return None if chk.ok else chk.reason

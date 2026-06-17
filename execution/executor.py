@@ -23,8 +23,9 @@ from execution.costs import CostModel
 from execution.guards import GuardManager
 from execution.models import Decision, ExecutionResult, ExitReason, Fill, NormalizedFill, OrderOutcome
 from execution.order_lifecycle import UNSAFE_STATES, entry_outcome
-from execution.policy import (close_books_fully, duplicate_exit_risk, exit_product_supported,
-                              live_structures_block_reason, normalize_exit_status, order_allowed)
+from execution.policy import (close_books_fully, duplicate_exit_risk, entry_meta_block_reason,
+                              exit_product_supported, live_structures_block_reason,
+                              normalize_exit_status, order_allowed)
 from execution.position_book import PositionBook
 from execution.recovery import adopt_open_positions
 from execution.simulator import FillSimulator
@@ -175,6 +176,22 @@ class Executor:
             log.error("entry_unsupported_product", exchange=exch, product=decision.product)
             return ExecutionResult(OrderOutcome.REJECTED, decision,
                                    reason=f"unsupported exchange/product for live: {exch}/{decision.product}")
+        # P2#30: validate the entry against instrument metadata (lot multiple, tick
+        # alignment, expiry) before sending a live order. Fail-closed for live; sim
+        # never reaches here. Freeze-quantity is handled by the slicer below.
+        meta = dict(decision.instrument or {})
+        _tok = meta.get("instrument_token")
+        if _tok is not None:
+            _looked = await get_instrument(_tok)
+            if _looked:
+                meta.update(_looked)
+        meta_block = entry_meta_block_reason("live", decision.quantity,
+                                             decision.entry_price, meta, decision.order_type)
+        if meta_block:
+            log.error("entry_meta_blocked", reason=meta_block,
+                      tradingsymbol=decision.instrument.get("tradingsymbol"))
+            return ExecutionResult(OrderOutcome.REJECTED, decision,
+                                   reason=f"instrument-meta: {meta_block}")
         clips = self._slice(decision.quantity, self._freeze_limit(decision.instrument))
         filled, notional, order_ids = 0, 0.0, []
         remainder_dealt_with = True   # P0#5: False if a clip leaves an unconfirmed remainder

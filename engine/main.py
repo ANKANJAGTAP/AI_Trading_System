@@ -27,6 +27,7 @@ from common.events import publish_event
 from common.logging import configure_logging, get_logger
 from common.market_time import IST, is_within, now_ist
 from common.redis_client import close_redis, get_redis
+from common.dataquality import validate_tick
 from common.state import get_state, set_state
 from config.loader import get_config
 from config.settings import get_settings
@@ -56,13 +57,23 @@ log = get_logger("engine")
 
 def _make_ltp_handler(executor):
     """Fast loop (spec §1): per-tick, drive the guards of any open position on that
-    instrument. Pure price checks — no pipelines, no LLM, no blocking work."""
+    instrument. Pure price checks — no pipelines, no LLM, no blocking work.
+    #29: an obviously-bad tick (non-positive, crossed, or an egregious >50% single-
+    tick jump) is skipped so a garbage quote never trips a stop/target; the last
+    GOOD price per token is kept as the jump baseline."""
+    last_good: dict[int, float] = {}
+
     async def on_ltp(ltp_map: dict) -> None:
         for tok_s, price in ltp_map.items():
             try:
                 token, px = int(tok_s), float(price)
             except (TypeError, ValueError):
                 continue
+            chk = validate_tick(px, prev_price=last_good.get(token), max_jump_pct=0.50)
+            if not chk.ok:
+                log.warning("tick_rejected", token=token, price=px, reason=chk.reason)
+                continue
+            last_good[token] = px
             for pid in executor.guards.for_token(token):
                 try:
                     await executor.on_price(pid, px)
