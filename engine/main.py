@@ -748,6 +748,30 @@ async def _health_digest_job(alerter) -> None:
         log.error("health_digest_failed", error=str(exc))
 
 
+async def _heartbeat_loop(adapter) -> None:
+    """P1#13: independent liveness beacon — proves the process + its deps are alive
+    regardless of whether the trading loops are gated on/off. Publishes a richer
+    doc to aegis:engine:liveness and keeps the legacy heartbeat key fresh."""
+    import json as _json
+    while True:
+        doc = {"ts": now_ist().isoformat(), "loop": "alive"}
+        try:
+            await fetchval("SELECT 1")
+            doc["db_ok"] = True
+        except Exception:
+            doc["db_ok"] = False
+        try:
+            r = await get_redis()
+            await r.ping()
+            doc["redis_ok"] = True
+            await r.set("aegis:engine:liveness", _json.dumps(doc))
+            await r.set("aegis:engine:heartbeat", doc["ts"])
+        except Exception as exc:
+            doc["redis_ok"] = False
+            log.warning("heartbeat_publish_failed", error=str(exc))
+        await asyncio.sleep(15)
+
+
 async def bootstrap():
     configure_logging()
     cfg = get_config()
@@ -881,6 +905,7 @@ async def bootstrap():
                           args=[alerter], id="health_digest", replace_existing=True)
         log.info("health_digest_scheduled", at=f"{hh}:{mm}")
     scheduler.start()
+    asyncio.create_task(_heartbeat_loop(adapter))   # P1#13: independent liveness beacon
     log.info("engine_started", mode=cfg.execution.mode)
     return adapter, scheduler, md_service
 

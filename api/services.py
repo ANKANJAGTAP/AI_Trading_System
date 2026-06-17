@@ -476,11 +476,26 @@ async def health() -> dict:
             feed_status = ("ok" if age < 15 else "stale") if session == "OPEN" else "idle"
         except Exception:
             feed_status = "ok"
+    # P1#13: engine liveness (ok | degraded | down), independent of the slow loop.
+    import json as _json
+    from common.heartbeat import heartbeat_status
+    try:
+        _raw = await r.get("aegis:engine:liveness")
+        _live_doc = _json.loads(_raw) if _raw else None
+    except Exception:
+        _live_doc = None
+    _hb_age = None
+    if _live_doc and _live_doc.get("ts"):
+        try:
+            _hb_age = (nowi - datetime.fromisoformat(_live_doc["ts"])).total_seconds()
+        except Exception:
+            _hb_age = None
+    liveness = heartbeat_status(_live_doc, _hb_age, live=(await current_mode()) == "live")
     return {"feed": feed_status, "feed_last_tick": feed_last,
             "token": "ok" if token_ok else "stale",
             "token_expiry": expiry.isoformat() if token_ok else None,
             "last_reconcile": await r.get("aegis:feed:last_reconcile"),
-            "rate_limit_headroom": None, "loop_heartbeat": hb, "session_state": session,
+            "rate_limit_headroom": None, "loop_heartbeat": hb, "liveness": liveness, "session_state": session,
             "error_rate": round(errs / total, 4) if total else 0.0,
             "mode": await current_mode(), "paused": bool(await get_state("engine_paused", False)),
             "kill_switch_active": bool(await get_state("kill_switch_active", False)),
