@@ -5,12 +5,14 @@ from __future__ import annotations
 
 import statistics as st
 
+from backtest.validation import probabilistic_sharpe_ratio
+
 
 def compute_metrics(trades: list[dict], starting_capital: float) -> dict:
     """trades: dicts with at least pnl, r_multiple, ts. Returns KPIs + curves."""
     if not trades:
         return {"trades": 0, "win_rate": 0.0, "profit_factor": 0.0, "expectancy_R": 0.0,
-                "net_pnl": 0.0, "return_pct": 0.0, "max_dd": 0.0, "sharpe": 0.0,
+                "net_pnl": 0.0, "return_pct": 0.0, "max_dd": 0.0, "sharpe": 0.0, "psr": 0.0,
                 "largest_win": 0.0, "largest_loss": 0.0,
                 "equity_curve": [], "drawdown_curve": []}
 
@@ -41,6 +43,10 @@ def compute_metrics(trades: list[dict], starting_capital: float) -> dict:
         "return_pct": round(sum(pnls) / starting_capital * 100, 2) if starting_capital else 0.0,
         "max_dd": max_dd,
         "sharpe": sharpe,
+        # P26: probability the per-trade edge is real given sample size + skew/kurtosis
+        # (Probabilistic Sharpe vs 0). Low PSR on a pretty equity curve = too few / too
+        # fat-tailed trades to trust the Sharpe yet.
+        "psr": round(probabilistic_sharpe_ratio(rmults), 3) if len(rmults) > 1 else 0.0,
         "largest_win": round(max(wins), 2) if wins else 0.0,
         "largest_loss": round(min(losses), 2) if losses else 0.0,
         "equity_curve": equity,
