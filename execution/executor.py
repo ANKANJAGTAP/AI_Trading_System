@@ -24,7 +24,7 @@ from execution.guards import GuardManager
 from execution.models import Decision, ExecutionResult, ExitReason, Fill, NormalizedFill, OrderOutcome
 from execution.order_lifecycle import UNSAFE_STATES, entry_outcome
 from execution.policy import (close_books_fully, duplicate_exit_risk, exit_product_supported,
-                              live_structures_block_reason, normalize_exit_status)
+                              live_structures_block_reason, normalize_exit_status, order_allowed)
 from execution.position_book import PositionBook
 from execution.recovery import adopt_open_positions
 from execution.simulator import FillSimulator
@@ -131,11 +131,12 @@ class Executor:
         mode = await self.current_mode()
         if await get_state("engine_halted", False):
             return ExecutionResult(OrderOutcome.REJECTED, decision, reason="engine halted (fail-safe active)")
-        if await get_state("kill_switch_active", False):
-            return ExecutionResult(OrderOutcome.REJECTED, decision, reason="kill-switch active")
-        if await get_state("block_new_entries", False):   # P0#5: unprotected/reconcile pending
+        # P1#14: single ENTRY gate (kill-switch + block-new-entries), shared with
+        # execute_structure() so every entry path is gated identically.
+        if not order_allowed("ENTRY", await get_state("kill_switch_active", False),
+                             await get_state("block_new_entries", False)):
             return ExecutionResult(OrderOutcome.REJECTED, decision,
-                                   reason="new entries blocked (unsafe live state — reconcile required)")
+                                   reason="entry blocked (kill-switch active or new entries blocked)")
         if mode == "live":
             return await self._execute_live(decision)
         return await self._execute_sim(decision, force_fill_qty)
@@ -424,8 +425,11 @@ class Executor:
         multi-leg placement is refused rather than half-executed."""
         if await get_state("engine_halted", False):
             return {"outcome": "REJECTED", "reason": "engine halted", "correlation_id": correlation_id}
-        if await get_state("kill_switch_active", False):
-            return {"outcome": "REJECTED", "reason": "kill-switch active", "correlation_id": correlation_id}
+        # P1#14: same single ENTRY gate as execute() — now also honors block_new_entries.
+        if not order_allowed("ENTRY", await get_state("kill_switch_active", False),
+                             await get_state("block_new_entries", False)):
+            return {"outcome": "REJECTED", "reason": "entry blocked (kill-switch / new entries blocked)",
+                    "correlation_id": correlation_id}
         block = live_structures_block_reason(
             await self.current_mode(),
             bool(getattr(self.config.execution, "fno_live_structures_enabled", False)))
