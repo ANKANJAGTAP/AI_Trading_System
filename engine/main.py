@@ -353,12 +353,16 @@ async def _manage_loop(cfg, risk, executor, md_service) -> None:
     flattened by 14:30 (the pinning hours are a different, hostile regime)."""
     await asyncio.sleep(15)
     market = (cfg.data.feed or {}).get("market_window", ["09:15", "15:30"])
+    # P1#10: keep managing open risk whenever ANY venue is open (covers the MCX
+    # evening session, not just the equity window).
+    from common.sessions import MarketSessions
+    sessions = MarketSessions()
     ks_day = None
     monthly_expiry = False
     eq_flattened = False
     while True:
         try:
-            if not is_within(market[0], market[1]):
+            if not sessions.any_open():
                 await asyncio.sleep(60); continue
             today = now_ist().date()
             if ks_day != today:
