@@ -50,7 +50,7 @@ These are the only things that stand between "paper on AWS" and "transacting rea
 - ⬜ **#24 Align backtest & live params** — shared config, persisted config hash per run, mismatch test.
 - 🟡 **#25 Execution realism** — ✅ honest intrabar fills (gap-through-stop fills at the open, limit-target fills at limit-or-better, both-touched resolves stop-first, directional slippage) in `backtest/execution_model.py`, wired into the engine + unit-tested. ⬜ still: order-rejection, rate-limit, and freeze-qty modeling.
 - 🟡 **#26 Walk-forward + OOS** — ✅ overfitting-stats core (`backtest/validation.py`: Probabilistic & Deflated Sharpe + PBO/CSCV), ✅ every backtest now reports PSR, ✅ sweep verdict (`backtest/sweep.py`: align → DSR → PBO → robust/inconclusive/overfit) ready to wire to an endpoint. ⬜ still: a sweep runner on the backtest API, regime buckets, parameter-decay kill criteria.
-- 🟡 **#27 Meta-label discipline** — ✅ triple-barrier labeling (`research/triple_barrier.py`: +1/-1/0 by first barrier touched, stop-first straddle, no look-ahead), unit-tested. ⬜ still: wire it into the dataset builder, min-sample/class-balance gating, leakage report, model versioning + rollback.
+- ✅ **#27 Meta-label discipline** — already enforced in `api/research.train_and_register`: min-sample + class-balance gates, purged expanding-window CV with embargo (leakage-safe), activate-only-if-it-beats-baseline validation gate; model versioning + rollback in `research/registry.py` (`save_model`/`list_models`/`activate`). ✅ triple-barrier labeling (`research/triple_barrier.py`) added as the honest label primitive. ⬜ optional: train an alternative model on triple-barrier labels (needs per-signal price paths).
 
 ## 5. Feed, data & scalability
 
