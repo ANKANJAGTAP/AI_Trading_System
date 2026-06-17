@@ -20,7 +20,7 @@ from apscheduler.triggers.cron import CronTrigger
 from broker.kite_adapter import KiteAdapter
 from broker.scheduler import build_scheduler
 from common.alerts import Alerter
-from common.commands import dequeue_commands
+from common.commands import claim_commands, complete_command, fail_command, recover_stuck_commands
 from common.cooldown import in_cooldown
 from common.db import close_pool, fetch, fetchval, init_pool
 from common.events import publish_event
@@ -576,42 +576,48 @@ async def _command_loop(executor) -> None:
     Runs regardless of feed state so the panic button always works."""
     while True:
         try:
-            for cmd in await dequeue_commands():
-                kind = cmd.get("type")
-                if kind == "flatten":
-                    for g in list(executor.structures.all()):
-                        await close_structure(executor, g, "operator_flatten", force=True)
-                    await safe_exit_all(executor, cmd.get("reason", "operator flatten-all"))
-                elif kind == "close":
-                    cid = str(cmd.get("id"))
-                    if cid.isdigit():
-                        await executor.close(int(cid), "operator_close")
-                    else:
-                        for g in [x for x in executor.structures.all() if x.correlation_id == cid]:
-                            await close_structure(executor, g, "operator_close", force=True)
-                elif kind == "modify":
-                    cid = str(cmd.get("id"))
-                    if cid.isdigit():
-                        guard = executor.guards.guards.get(int(cid))
-                        if guard:
-                            long = guard.side == "BUY"
-                            # Validate sides: a long's stop is below entry & target above
-                            # (inverted for a short). Reject fat-finger levels.
-                            if cmd.get("stop") is not None:
-                                ns = float(cmd["stop"])
-                                if (ns < guard.entry) if long else (ns > guard.entry):
-                                    guard.stop = ns
-                                else:
-                                    log.warning("modify_rejected_bad_stop", id=cid, stop=ns,
-                                                side=guard.side, entry=guard.entry)
-                            if cmd.get("target") is not None:
-                                nt = float(cmd["target"])
-                                if (nt > guard.entry) if long else (nt < guard.entry):
-                                    guard.target = nt
-                                else:
-                                    log.warning("modify_rejected_bad_target", id=cid, target=nt,
-                                                side=guard.side, entry=guard.entry)
-                            log.info("position_modified", id=cid, stop=guard.stop, target=guard.target)
+            for cmd in await claim_commands("engine"):   # P1#12: durable claim
+                cid_db = cmd.get("_id")
+                try:
+                    kind = cmd.get("type")
+                    if kind == "flatten":
+                        for g in list(executor.structures.all()):
+                            await close_structure(executor, g, "operator_flatten", force=True)
+                        await safe_exit_all(executor, cmd.get("reason", "operator flatten-all"))
+                    elif kind == "close":
+                        cid = str(cmd.get("id"))
+                        if cid.isdigit():
+                            await executor.close(int(cid), "operator_close")
+                        else:
+                            for g in [x for x in executor.structures.all() if x.correlation_id == cid]:
+                                await close_structure(executor, g, "operator_close", force=True)
+                    elif kind == "modify":
+                        cid = str(cmd.get("id"))
+                        if cid.isdigit():
+                            guard = executor.guards.guards.get(int(cid))
+                            if guard:
+                                long = guard.side == "BUY"
+                                # Validate sides: a long's stop is below entry & target above
+                                # (inverted for a short). Reject fat-finger levels.
+                                if cmd.get("stop") is not None:
+                                    ns = float(cmd["stop"])
+                                    if (ns < guard.entry) if long else (ns > guard.entry):
+                                        guard.stop = ns
+                                    else:
+                                        log.warning("modify_rejected_bad_stop", id=cid, stop=ns,
+                                                    side=guard.side, entry=guard.entry)
+                                if cmd.get("target") is not None:
+                                    nt = float(cmd["target"])
+                                    if (nt > guard.entry) if long else (nt < guard.entry):
+                                        guard.target = nt
+                                    else:
+                                        log.warning("modify_rejected_bad_target", id=cid, target=nt,
+                                                    side=guard.side, entry=guard.entry)
+                                log.info("position_modified", id=cid, stop=guard.stop, target=guard.target)
+                    await complete_command(cid_db)   # P1#12: mark SUCCEEDED only after it ran
+                except Exception as exc:
+                    log.error("command_exec_error", id=cid_db, type=cmd.get("type"), error=str(exc))
+                    await fail_command(cid_db, str(exc))   # -> RETRYING / DEAD_LETTER
         except Exception as exc:
             log.error("command_loop_error", error=str(exc))
         await asyncio.sleep(1)
@@ -835,7 +841,13 @@ async def bootstrap():
             md_service.on_failsafe = _failsafe
             asyncio.create_task(_manage_loop(cfg, risk_engine, executor, md_service))  # always-on risk mgmt
             asyncio.create_task(_slow_loop(cfg, orchestrator, risk_engine, md_service))
-            asyncio.create_task(_command_loop(executor))  # operator commands from the API
+            try:
+                _rec = await recover_stuck_commands()   # P1#12: replay crashed-mid-flight commands
+                if _rec:
+                    log.info("commands_recovered", count=_rec)
+            except Exception as exc:
+                log.warning("command_recovery_failed", error=str(exc))
+            asyncio.create_task(_command_loop(executor))  # durable operator commands from the API
             log.info("trading_stack_ready", mode=cfg.execution.mode)
         except Exception as exc:
             log.error("trading_stack_init_failed", error=str(exc))
