@@ -119,8 +119,14 @@ async def _update_killswitch(risk, executor) -> None:
     """Recompute the day's realized+unrealized P&L, push it into daily_pnl, then let
     the kill switch evaluate the daily max-loss line. On a fresh trip, flatten."""
     start = now_ist().replace(hour=0, minute=0, second=0, microsecond=0)
-    rows = await fetch("SELECT status, COALESCE(realized_pnl,0) rp, COALESCE(unrealized_pnl,0) up "
-                       "FROM positions WHERE (status='closed' AND closed_at>=$1) OR status='open'", start)
+    # P1#8: scope the kill-switch P&L to the ACTIVE namespace (paper P&L must not
+    # feed a live kill-switch, and vice-versa).
+    from common.runtime_mode import get_runtime_mode
+    from risk.scope import position_scope, where_clause
+    frag, sargs = where_clause(position_scope(await get_runtime_mode()), start_idx=2)
+    rows = await fetch(f"SELECT status, COALESCE(realized_pnl,0) rp, COALESCE(unrealized_pnl,0) up "
+                       f"FROM positions WHERE {frag} AND ((status='closed' AND closed_at>=$1) OR status='open')",
+                       start, *sargs)
     realized = sum(float(x["rp"]) for x in rows if x["status"] == "closed")
     unrealized = sum(float(x["up"]) for x in rows if x["status"] == "open")
     await risk.kill_switch.update_pnl(realized=realized, unrealized=unrealized)

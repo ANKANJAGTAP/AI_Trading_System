@@ -9,11 +9,18 @@ from common.db import fetch
 
 
 class PositionsProvider:
-    async def open_positions(self) -> list[dict]:
-        rows = await fetch(
-            "SELECT correlation_id, instrument_token, tradingsymbol, sleeve, side, quantity, "
-            "average_price, r_rupees FROM positions WHERE status = 'open'"
-        )
+    async def open_positions(self, scope: dict | None = None) -> list[dict]:
+        # P1#8: when a scope is given, restrict to that mode/account so paper and
+        # live books never mix into one risk calculation.
+        sql = ("SELECT correlation_id, instrument_token, tradingsymbol, sleeve, side, quantity, "
+               "average_price, r_rupees FROM positions WHERE status = 'open'")
+        args: list = []
+        if scope:
+            from risk.scope import where_clause
+            frag, a = where_clause(scope, start_idx=1)
+            sql += " AND " + frag
+            args = a
+        rows = await fetch(sql, *args)
         return [dict(r) for r in rows]
 
 
@@ -21,7 +28,7 @@ class StaticPositionsProvider(PositionsProvider):
     def __init__(self, positions: list[dict]) -> None:
         self._positions = positions
 
-    async def open_positions(self) -> list[dict]:
+    async def open_positions(self, scope: dict | None = None) -> list[dict]:
         return list(self._positions)
 
 

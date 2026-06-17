@@ -20,18 +20,26 @@ class PositionBook:
     async def open_position(self, decision, fill, mode: str) -> int:
         # P0#3: persist product/exchange/variety/order_type/instrument_type so the
         # exit can derive the correct order fields (no hardcoded MIS at close).
+        # P1#8: persist account_id/broker so risk/P&L reads scope by mode+account.
         inst = decision.instrument or {}
+        account_id = "paper"
+        if mode == "live":
+            try:
+                from common.runtime_mode import load_runtime_mode
+                account_id = (await load_runtime_mode()).broker_account_id
+            except Exception:
+                account_id = None
         row = await fetchrow(
             "INSERT INTO positions (correlation_id, mode, sleeve, instrument_token, tradingsymbol, "
             "side, quantity, average_price, entry_price, stop_price, target_price, r_rupees, "
-            "product, exchange, variety, order_type, instrument_type, status, raw) "
-            "VALUES ($1::uuid,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,'open',$18::jsonb) RETURNING id",
+            "product, exchange, variety, order_type, instrument_type, account_id, broker, status, raw) "
+            "VALUES ($1::uuid,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,'open',$20::jsonb) RETURNING id",
             decision.correlation_id, mode, decision.sleeve,
             inst.get("instrument_token"), inst.get("tradingsymbol"),
             decision.side, fill.quantity, fill.price, fill.price,
             decision.stop_price, decision.target_price, decision.r_rupees,
             decision.product, inst.get("exchange"), getattr(decision, "variety", "regular") or "regular",
-            decision.order_type, inst.get("instrument_type"),
+            decision.order_type, inst.get("instrument_type"), account_id, "kite",
             json.dumps({"entry_fees": fill.fees}),
         )
         pid = row["id"]

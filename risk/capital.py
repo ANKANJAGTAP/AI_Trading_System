@@ -55,8 +55,17 @@ class CapitalReader:
                 return self._cache
             try:
                 from common.db import fetchval
+                scope_sql, scope_args = "", []
+                if self.mode_provider is not None:   # P1#8: compound only the active namespace's P&L
+                    try:
+                        from risk.scope import position_scope, where_clause
+                        frag, a = where_clause(position_scope(await self.mode_provider()), start_idx=1)
+                        scope_sql, scope_args = " AND " + frag, a
+                    except Exception:
+                        pass
                 realized = float(await fetchval(
-                    "SELECT COALESCE(SUM(realized_pnl),0) FROM positions WHERE status='closed'") or 0)
+                    f"SELECT COALESCE(SUM(realized_pnl),0) FROM positions WHERE status='closed'{scope_sql}",
+                    *scope_args) or 0)
             except Exception as exc:
                 log.warning("compound_capital_read_failed", error=str(exc))
                 realized = 0.0

@@ -64,6 +64,15 @@ class RiskEngine:
     def _per_trade(self) -> float:
         return self._per_trade_pct or self.config.risk.per_trade_risk_pct.default
 
+    async def _scope(self):
+        """P1#8: active mode+account scope for position reads (None = unscoped)."""
+        try:
+            from common.runtime_mode import get_runtime_mode
+            from risk.scope import position_scope
+            return position_scope(await get_runtime_mode())
+        except Exception:
+            return None
+
     async def _vol_scale(self) -> float:
         """India-VIX size scalar (config `risk.vol_scaling`): full size at/below the
         reference VIX, shrinking proportionally above it (ref/VIX, floored at
@@ -161,7 +170,7 @@ class RiskEngine:
         if capital <= 0:
             return SizingResult.reject("no live capital (account funds/segment pending activation)")
 
-        positions = await self.positions.open_positions()
+        positions = await self.positions.open_positions(await self._scope())
         maxc = max_concurrent_positions(
             self.config.risk.portfolio_risk_limit_pct.default,
             self._per_trade(),
@@ -244,7 +253,7 @@ class RiskEngine:
         capital = await self.capital.get_capital()
         if capital <= 0:
             return SizingResult.reject("no live capital (account funds/segment pending activation)")
-        positions = await self.positions.open_positions()
+        positions = await self.positions.open_positions(await self._scope())
 
         # Structures must respect max-concurrent too (as trades, not legs).
         maxc = max_concurrent_positions(
@@ -294,5 +303,5 @@ class RiskEngine:
 
     async def portfolio_heat(self):
         capital = await self.capital.get_capital()
-        positions = await self.positions.open_positions()
+        positions = await self.positions.open_positions(await self._scope())
         return await compute_heat(self.config, positions, capital, per_trade_pct=self._per_trade())
