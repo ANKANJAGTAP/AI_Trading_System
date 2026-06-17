@@ -28,7 +28,8 @@ async def _main(args) -> None:
             meta_cfg["min_samples"] = args.min_samples
         ds = await research_svc.dataset_stats()
         print(f"dataset: {ds['n_samples']} labelled trades · base win-rate {ds['base_rate']*100:.0f}%")
-        res = await research_svc.train_and_register(args.name, meta_cfg=meta_cfg)
+        res = await research_svc.train_and_register(args.name, meta_cfg=meta_cfg,
+                                                    label_mode=args.labels)
         if res.get("error"):
             print("ERROR:", res["error"])
             return
@@ -52,4 +53,6 @@ if __name__ == "__main__":
     p.add_argument("--name", default=None)
     p.add_argument("--min-samples", type=int, default=None,
                    help="override config system.meta_label.min_samples")
+    p.add_argument("--labels", choices=["realized", "triple_barrier"], default="realized",
+                   help="label source: realized trade P&L (default) or triple-barrier outcome")
     asyncio.run(_main(p.parse_args()))

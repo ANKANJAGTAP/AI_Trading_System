@@ -24,7 +24,7 @@ These are the only things that stand between "paper on AWS" and "transacting rea
 
 - ⬜ 🔒 **Validate the real Kite adapter live** — `broker/kite_adapter.py` methods are thin Kite-SDK pass-throughs (orders/positions/historical/quote/GTT/OCO; auth + token refresh work). Contract behaviour is pinned by `tests/test_broker_contract.py` + the `MockBroker` sim, and `scripts/verify_broker_adapter.py` checks the live read + order→fill→book path read-only. Remaining: run that validation against real Kite (your Mac) + the streaming websocket feed. *(maps to upgrade #37 + world-class Phase 1/5)*
 - ⬜ 🔒 **Rotate leaked secrets** — Kite key/secret + DB password were exposed in plaintext earlier. Rotate at the source (Kite console / DB) — **user action**, Claude cannot enter credentials.
-- ⬜ 🔒 **Live market-data feed** — real-time websocket tick stream + per-venue feed health (depends on the adapter).
+- 🟡 🔒 **Live market-data feed** — **implemented** (`data/feed.py` FeedManager: KiteTicker → candle aggregation → Redis LTP → fast-loop, with a staleness watchdog, auto-reconnect on fresh token, and gap reconciliation). Remaining is **operational, not code**: a valid daily Kite token on the server + market hours — it connects automatically when the engine runs (paper mode uses it for live prices too).
 
 ---
 
@@ -50,7 +50,7 @@ These are the only things that stand between "paper on AWS" and "transacting rea
 - ✅ **#24 Align backtest & live params** — `backtest/provenance.py` config fingerprint (stable hash of result-affecting sections) stamped on every run + sweep; `diff_configs` reports backtest-vs-live drift. Unit-tested.
 - ✅ **#25 Execution realism** — honest intrabar fills (gap-through-stop, limit targets, stop-first, directional slippage) **plus** order-rejection (price-band), freeze-qty slicing, and rate-limit models in `backtest/execution_model.py`; price-band rejection wired into the engine entry. Unit-tested.
 - ✅ **#26 Walk-forward + OOS** — overfitting core (PSR / Deflated Sharpe / PBO·CSCV) + sweep verdict **live at `POST /api/backtest/sweep`**; regime-bucketed performance + parameter-decay kill criteria in `backtest/regime_analysis.py`. Unit-tested.
-- ✅ **#27 Meta-label discipline** — already enforced in `api/research.train_and_register`: min-sample + class-balance gates, purged expanding-window CV with embargo (leakage-safe), activate-only-if-it-beats-baseline validation gate; model versioning + rollback in `research/registry.py` (`save_model`/`list_models`/`activate`). ✅ triple-barrier labeling (`research/triple_barrier.py`) added as the honest label primitive. ⬜ optional: train an alternative model on triple-barrier labels (needs per-signal price paths).
+- ✅ **#27 Meta-label discipline** — already enforced in `api/research.train_and_register`: min-sample + class-balance gates, purged expanding-window CV with embargo (leakage-safe), activate-only-if-it-beats-baseline validation gate; model versioning + rollback in `research/registry.py` (`save_model`/`list_models`/`activate`). ✅ triple-barrier labeling (`research/triple_barrier.py`); ✅ alternative model trains on triple-barrier labels via `build_triple_barrier_dataset` + `train_and_register(label_mode="triple_barrier")` (CLI: `train_meta.py --labels triple_barrier`), through the same CV / validation / registry discipline.
 
 ## 5. Feed, data & scalability
 

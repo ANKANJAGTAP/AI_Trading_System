@@ -48,6 +48,14 @@ def triple_barrier_label(highs_fwd, lows_fwd, entry_price: float, side: str = "B
     return {"label": 0, "barrier": "vertical", "holding": horizon, "exit_price": None}
 
 
+def barrier_to_meta_label(barrier_label: int) -> int:
+    """Meta-label for the model: 1 if the profit target was hit first (+1), else 0
+    (stop hit, or timed out at the vertical barrier). The honest "was this signal
+    worth taking?" target — path- and horizon-aware, independent of how the live
+    exit actually played out."""
+    return 1 if barrier_label == 1 else 0
+
+
 def label_events(highs, lows, events, *, pt_pct: float, sl_pct: float,
                  max_holding: int) -> list[dict]:
     """Label a batch of events against one OHLC series. `events` is a list of dicts

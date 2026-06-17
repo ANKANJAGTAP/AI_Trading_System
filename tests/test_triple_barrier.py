@@ -69,6 +69,13 @@ def test_label_events_uses_only_forward_bars():
     assert last[0]["label"] == 0 and last[0]["holding"] == 0
 
 
+def test_barrier_to_meta_label():
+    from research.triple_barrier import barrier_to_meta_label
+    assert barrier_to_meta_label(1) == 1       # target first -> worth taking
+    assert barrier_to_meta_label(-1) == 0      # stopped out
+    assert barrier_to_meta_label(0) == 0       # timed out
+
+
 def test_label_values_are_valid_and_event_fields_preserved():
     highs = [100 + i for i in range(20)]
     lows = [100 - i * 0.1 for i in range(20)]

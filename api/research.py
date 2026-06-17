@@ -57,7 +57,7 @@ def _select_features(samples: list[dict], all_feats: list[str], max_features: in
 
 
 async def train_and_register(name: str | None = None, min_samples: int = 80,
-                             meta_cfg: dict | None = None) -> dict:
+                             meta_cfg: dict | None = None, label_mode: str = "realized") -> dict:
     """Train/validate with PURGED EXPANDING-WINDOW CV (López de Prado): the series is
     chunked sequentially; each fold trains on everything BEFORE the test chunk minus
     an embargo sample, so no future information leaks and the verdict rests on
@@ -75,7 +75,14 @@ async def train_and_register(name: str | None = None, min_samples: int = 80,
     max_features = int(cfg.get("max_features", 12) or 0)
     embargo = 1
 
-    samples = await build_dataset()   # ordered by signal id == time
+    if label_mode == "triple_barrier":
+        from research.dataset import build_triple_barrier_dataset
+        tb = cfg.get("triple_barrier") or {}
+        samples = await build_triple_barrier_dataset(
+            pt_pct=float(tb.get("pt_pct", 0.02)), sl_pct=float(tb.get("sl_pct", 0.01)),
+            max_holding=int(tb.get("max_holding", 24)))
+    else:
+        samples = await build_dataset()   # ordered by signal id == time
     if len(samples) < min_samples:
         return {"error": f"not enough labeled trades to train ({len(samples)} < {min_samples})"}
     wins = sum(s["label"] for s in samples)
