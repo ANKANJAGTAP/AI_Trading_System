@@ -73,6 +73,14 @@ class RiskEngine:
         except Exception:
             return None
 
+    async def _risk_profile(self) -> str:
+        """P1#9: 'live' | 'paper' — live fails risk dependencies CLOSED."""
+        try:
+            from common.runtime_mode import get_runtime_mode
+            return (await get_runtime_mode()).risk_profile
+        except Exception:
+            return "paper"
+
     async def _vol_scale(self) -> float:
         """India-VIX size scalar (config `risk.vol_scaling`): full size at/below the
         reference VIX, shrinking proportionally above it (ref/VIX, floored at
@@ -191,6 +199,11 @@ class RiskEngine:
         kind = _kind_from_instrument(instrument)
         lot_size = int(instrument.get("lot_size") or 1) if kind is not InstrumentKind.EQUITY else 1
         margin_per_unit = await self._margin_per_unit(instrument, entry, side, sleeve, lot_size)
+        # P1#9: in live, a missing broker-margin number fails CLOSED (don't size
+        # without the margin clamp); in paper it degrades (proceeds, as before).
+        from risk.dependencies import must_block
+        if must_block(await self._risk_profile(), margin_per_unit is not None):
+            return SizingResult.reject("live risk dependency unavailable: broker margin (fail-closed)")
 
         # Live-margin clamp uses REMAINING free capital (total minus already-deployed),
         # so concurrent positions don't each size against the full account.
@@ -275,6 +288,10 @@ class RiskEngine:
         # equity path honors sleeve caps, structures must too.
         if margin_per_lot is None:
             margin_per_lot = await self._structure_margin_per_lot(underlying, expiry, structure, lot_size)
+        # P1#9: live fails closed when the basket margin can't be resolved.
+        from risk.dependencies import must_block
+        if must_block(await self._risk_profile(), margin_per_lot is not None):
+            return SizingResult.reject("live risk dependency unavailable: basket margin (fail-closed)")
         margin_available = None
         if margin_per_lot:
             deployed = sum(deployed_by_sleeve(positions).values())
