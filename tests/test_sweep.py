@@ -36,6 +36,12 @@ def test_sweep_insufficient_history():
     assert out["verdict"] == "insufficient_history"
 
 
+def test_sweep_no_trades_when_configs_have_no_data():
+    # configs ran but none produced trades (e.g. no candles for the window)
+    out = sweep_validation_report({"a": [], "b": [], "c": []})
+    assert out["verdict"] == "no_trades" and out["configs"] == 3 and out["with_data"] == 0
+
+
 def test_sweep_robust_for_dominant_config():
     per_cfg = {
         "A": [0.02 + (0.001 if i % 2 else -0.001) for i in range(40)],  # mean .02, tiny vol

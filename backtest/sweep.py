@@ -62,9 +62,15 @@ def sweep_validation_report(per_config_returns: dict[str, list[float]],
                             n_splits: int = 10) -> dict:
     """`per_config_returns`: {config_label: [period_return, ...]}. Series are aligned
     to their common length. Returns the best config and the overfitting verdict."""
-    labels = [k for k, v in per_config_returns.items() if v]
+    n_total = len(per_config_returns)
+    labels = [k for k, v in per_config_returns.items() if v]   # configs with >=1 period
+    if n_total < 2:
+        return {"configs": n_total, "verdict": "insufficient_configs"}
     if len(labels) < 2:
-        return {"configs": len(labels), "verdict": "insufficient_configs"}
+        return {"configs": n_total, "with_data": len(labels), "verdict": "no_trades",
+                "note": "fewer than 2 configs produced any trades — check symbol/date "
+                        "coverage (intraday needs 5m candles; the EOD bhavcopy lake "
+                        "feeds the daily/swing sleeves)"}
     length = min(len(per_config_returns[k]) for k in labels)
     if length < 2:
         return {"configs": len(labels), "verdict": "insufficient_history"}
