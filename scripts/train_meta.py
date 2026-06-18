@@ -26,8 +26,14 @@ async def _main(args) -> None:
         meta_cfg = dict(getattr(get_config().system, "meta_label", {}) or {})
         if args.min_samples:
             meta_cfg["min_samples"] = args.min_samples
-        ds = await research_svc.dataset_stats()
-        print(f"dataset: {ds['n_samples']} labelled trades · base win-rate {ds['base_rate']*100:.0f}%")
+        if args.labels == "triple_barrier":
+            meta_cfg["triple_barrier"] = {"pt_pct": args.pt_pct, "sl_pct": args.sl_pct,
+                                          "max_holding": args.max_holding}
+            print(f"label mode: triple-barrier (pt={args.pt_pct:.1%} sl={args.sl_pct:.1%} "
+                  f"hold={args.max_holding} bars) — labels built from forward price paths at train time")
+        else:
+            ds = await research_svc.dataset_stats()
+            print(f"dataset: {ds['n_samples']} labelled trades · base win-rate {ds['base_rate']*100:.0f}%")
         res = await research_svc.train_and_register(args.name, meta_cfg=meta_cfg,
                                                     label_mode=args.labels)
         if res.get("error"):
@@ -55,4 +61,10 @@ if __name__ == "__main__":
                    help="override config system.meta_label.min_samples")
     p.add_argument("--labels", choices=["realized", "triple_barrier"], default="realized",
                    help="label source: realized trade P&L (default) or triple-barrier outcome")
+    p.add_argument("--pt-pct", type=float, default=0.02,
+                   help="triple-barrier profit target as a fraction (default 0.02 = 2%%)")
+    p.add_argument("--sl-pct", type=float, default=0.01,
+                   help="triple-barrier stop as a fraction (default 0.01 = 1%%); use ~= pt for balance")
+    p.add_argument("--max-holding", type=int, default=24,
+                   help="triple-barrier vertical/time barrier in bars (default 24)")
     asyncio.run(_main(p.parse_args()))
