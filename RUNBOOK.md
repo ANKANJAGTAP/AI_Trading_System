@@ -90,6 +90,24 @@ Secrets live in the server `~/ai-trading/.env` (gitignored, never deployed over)
 - **Token encryption:** set `TOKEN_ENCRYPTION_KEY` (Fernet) so the broker token is encrypted at rest; the pre-live `token_security` probe (#21) then passes outside dev.
 - **API tokens:** set `API_TOKEN_READONLY/OPERATOR/TRADER/ADMIN` (#19) and distribute per role; the legacy single `API_AUTH_TOKEN` acts as admin.
 
+## TrueData market data (historical backfill)
+
+Credentials live in `.env` (`TRUEDATA_USERNAME` / `TRUEDATA_PASSWORD` — the login id +
+password ARE the access; there is no separate key). The `truedata` SDK ships in
+requirements (installed on image build).
+
+Backfill intraday candles the EOD bhavcopy lake lacks (this is what made intraday
+backtests return zero trades):
+
+    sudo docker compose exec api python scripts/truedata_backfill.py \
+      --symbols NSE:RELIANCE NSE:TCS NSE:INFY --interval 5m --duration "30 D"
+
+Notes: a **trial** maps to the sandbox port with a limited symbol set — full segments
+and EOD F&O option chains need TrueData to enable the right port (email
+support@truedata.in). The option-symbol format in `dataplatform/vendors/truedata.py`
+is a documented best guess — verify it against your TrueData symbol master and adjust
+`truedata_symbol` if a pull returns nothing.
+
 ## Broker adapter validation (the live gate)
 
 Before the go-live flip, prove the real Kite adapter places, polls, and reports orders

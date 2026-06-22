@@ -14,7 +14,7 @@ Merges `upgrade.md` (safety ladder) + `WORLDCLASS_FNO_PLATFORM_PLAN.md` (institu
 - ✅ **P9** — SEBI-2026 algo compliance (Algo-ID tagging, market protection, OPS limiter, static-IP/OAuth gate, audit).
 - ✅ **Pillar 1 (data platform)** — contract/expiry resolver, bhavcopy EOD lake, Timescale schema, quality jobs, research API.
 - ✅ **Ops** — daily health digest, F&O Research + Pre-Live Readiness dashboard screens.
-- ✅ Migrations 0013–0023 applied; full suite green (486 tests); paper-mode live on AWS.
+- ✅ Migrations 0013–0023 applied; full suite green (490 tests); paper-mode live on AWS.
 
 ---
 
@@ -46,7 +46,7 @@ These are the only things that stand between "paper on AWS" and "transacting rea
 
 ## 4. Backtest & research validity
 
-- 🟡 **#23 Historical option-chain backtests** — ✅ option-leg fill realism + synthetic bid/ask spread model (`backtest/option_fills.py`: OTM / short-DTE / high-IV widen the spread) wired into `fno_engine` slippage; pure + unit-tested. ⬜ **data-only**: a real historical option chain (bid/ask/OI/IV/Greeks) is a §10 data-vendor dependency — pin/assignment effects follow once chains exist (can't be sourced in-repo).
+- 🟡 **#23 Historical option-chain backtests** — ✅ option-leg fill realism + synthetic bid/ask spread model (`backtest/option_fills.py`) wired into `fno_engine`; ✅ **TrueData vendor path** for real EOD option chains (`dataplatform/vendors/truedata.py` builds the chain via `TD_hist`) + intraday-bar backfill (`scripts/truedata_backfill.py`). ⬜ remaining: pull the chains on a TrueData port that allows full segments (trial is sandbox/limited) + verify the option-symbol format; pin/assignment effects.
 - ✅ **#24 Align backtest & live params** — `backtest/provenance.py` config fingerprint (stable hash of result-affecting sections) stamped on every run + sweep; `diff_configs` reports backtest-vs-live drift. Unit-tested.
 - ✅ **#25 Execution realism** — honest intrabar fills (gap-through-stop, limit targets, stop-first, directional slippage) **plus** order-rejection (price-band), freeze-qty slicing, and rate-limit models in `backtest/execution_model.py`; price-band rejection wired into the engine entry. Unit-tested.
 - ✅ **#26 Walk-forward + OOS** — overfitting core (PSR / Deflated Sharpe / PBO·CSCV) + sweep verdict **live at `POST /api/backtest/sweep`**; regime-bucketed performance + parameter-decay kill criteria in `backtest/regime_analysis.py`. Unit-tested.
@@ -90,7 +90,7 @@ These are the only things that stand between "paper on AWS" and "transacting rea
 - 🟡 **Phase 5 — Execution/risk** — ✅ options-portfolio Greeks limits, scenario-VaR/stress engine, pin/expiry controls (`risk/greeks_portfolio.py`, `risk/scenario_var.py`, `risk/expiry_control.py`); ✅ composed into `risk/structure_risk.assess_structure` and **wired into the paper F&O sim** — every structure carries net-greeks / stress-VaR / SPAN / expiry, with opt-in `fno.risk_gating` to block breaching structures. ⬜ remaining: the same gate in the live risk engine — deferred until live F&O is enabled (no-op on the current equity book).
 - 🟡 **Phase 6 — Compliance + paper-live + UX** — ✅ payoff/Greeks UX (**Structure Lab**: `/structure` screen + `POST /api/structure/analyze` — expiry payoff curve, net Greeks, stress-VaR, SPAN, expiry verdict), ✅ go-live walkthrough (`GO_LIVE.md`). ⬜ remaining: a full drag-and-drop strategy *builder* + sustained paper across expiry cycles (operational/time).
 - ⬜ 🔒 **Phase 7 — Controlled live**: tiny capital, one index/strategy, scale only on evidence. *(user action — real capital.)*
-- ⬜ **Data fuel (cross-cutting)** — **deferred** (no paid vendor yet; using recorded EOD bhavcopy + paper-feed data). Paid 1-min options vendor (`dataplatform/vendors/bar_vendor.py`) + `strategies/providers.py` fundamentals/ban-list remain stubs.
+- 🟡 **Data fuel (cross-cutting)** — ✅ **TrueData wired**: SDK in requirements, creds via `.env` (`TRUEDATA_USERNAME/PASSWORD`), EOD F&O-chain adapter + intraday-bar backfill (`scripts/truedata_backfill.py`), pure normalizers unit-tested. ⬜ remaining: run it on the trial / enabled port to actually load data; `strategies/providers.py` fundamentals + ban-list still stubs.
 
 ---
 

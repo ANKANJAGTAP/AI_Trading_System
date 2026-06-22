@@ -46,6 +46,34 @@ def truedata_symbol(underlying: str, expiry: dt.date,
     return f"{base}FUT"
 
 
+# --- intraday bar normalisation (TD_hist with a minute bar_size) --------------
+_TS_KEYS = ("time", "timestamp", "ts", "date", "datetime")
+
+
+def normalize_bar(b) -> dict:
+    """One TrueData bar (dict OR object) -> {ts, open, high, low, close, volume, oi}.
+    SDK field names vary by version, so several timestamp keys are tried. Pure."""
+    g = (lambda k: b.get(k) if isinstance(b, dict) else getattr(b, k, None))
+    ts = next((g(k) for k in _TS_KEYS if g(k) is not None), None)
+    return {"ts": ts, "open": g("open"), "high": g("high"), "low": g("low"),
+            "close": g("close"), "volume": g("volume") or 0, "oi": g("oi") or 0}
+
+
+def bars_to_candle_rows(bars, token: int, interval: str) -> list[tuple]:
+    """Normalise TrueData bars into candle-store rows
+    (ts, token, interval, open, high, low, close, volume, oi); skips incomplete bars.
+    Pure — feed it the SDK's bar list and a resolved instrument_token."""
+    rows = []
+    for raw in bars or []:
+        b = normalize_bar(raw)
+        if b["ts"] is None or b["open"] is None or b["close"] is None:
+            continue
+        rows.append((b["ts"], int(token), interval,
+                     float(b["open"]), float(b["high"]), float(b["low"]), float(b["close"]),
+                     int(b["volume"] or 0), int(b["oi"] or 0)))
+    return rows
+
+
 class TrueDataAdapter(BarVendorAdapter):
     id = "truedata"
     fieldmap = TRUEDATA_FIELDMAP
@@ -85,6 +113,13 @@ class TrueDataAdapter(BarVendorAdapter):
         g = (lambda k: b.get(k) if isinstance(b, dict) else getattr(b, k, None))
         return {"open": g("open"), "high": g("high"), "low": g("low"),
                 "close": g("close"), "volume": g("volume") or 0, "oi": g("oi") or 0}
+
+    def intraday_bars(self, symbol: str, duration: str = "5 D", bar_size: str = "1 min"):
+        """Raw intraday history for one symbol via TD_hist (e.g. duration='30 D',
+        bar_size='1 min' / '5 min'). Returns the SDK's bar list — normalise with the
+        module-level `bars_to_candle_rows`. Needs the truedata SDK + creds."""
+        td = self._connect()
+        return td.get_historic_data(symbol, duration=duration, bar_size=bar_size) or []
 
     # -- universe + assembly --------------------------------------------
     def _expiries(self, underlying: str, asof: dt.date) -> list[dt.date]:
