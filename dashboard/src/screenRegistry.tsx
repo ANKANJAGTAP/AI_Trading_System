@@ -17,6 +17,7 @@ import { Risk } from "@/screens/Risk";
 import { Settings } from "@/screens/Settings";
 import { Signals } from "@/screens/Signals";
 import { Sleeves } from "@/screens/Sleeves";
+import { StructureLab } from "@/screens/StructureLab";
 
 export const SCREENS: Record<string, ComponentType> = {
   "command-center": CommandCenter,
@@ -30,6 +31,7 @@ export const SCREENS: Record<string, ComponentType> = {
   risk: Risk,
   analytics: Analytics,
   backtest: Backtest,
+  structure: StructureLab,
   "fno-research": FnoResearch,
   prelive: PreLiveReadiness,
   audit: Audit,

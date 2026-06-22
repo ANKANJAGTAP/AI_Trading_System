@@ -27,6 +27,7 @@ import { Risk } from "@/screens/Risk";
 import { Settings } from "@/screens/Settings";
 import { Signals } from "@/screens/Signals";
 import { Sleeves } from "@/screens/Sleeves";
+import { StructureLab } from "@/screens/StructureLab";
 import { Watch } from "@/screens/Watch";
 import { useStore } from "@/store/store";
 
@@ -114,6 +115,7 @@ export default function App() {
           <Route path="risk" element={<Risk />} />
           <Route path="analytics" element={<Analytics />} />
           <Route path="backtest" element={<Backtest />} />
+          <Route path="structure" element={<StructureLab />} />
           <Route path="fno-research" element={<FnoResearch />} />
           <Route path="prelive" element={<PreLiveReadiness />} />
           <Route path="audit" element={<Audit />} />

@@ -87,6 +87,30 @@ async def get_readiness():
     return await readiness_svc.readiness_summary()
 
 
+class StructureLeg(BaseModel):
+    opt: str
+    strike: float
+    side: str = "BUY"
+    lots: float = 1.0
+
+
+class StructureAnalyzeBody(BaseModel):
+    spot: float
+    iv: float = 0.15
+    dte: int = 7
+    lot_size: int = 50
+    legs: list[StructureLeg]
+
+
+@router.post("/structure/analyze")
+async def post_structure_analyze(b: StructureAnalyzeBody):
+    # §10 Phase 6: payoff curve + risk profile (net greeks / stress-VaR / SPAN / expiry)
+    # for a multi-leg options structure. Pure compute — no DB.
+    from api import structure_lab
+    return structure_lab.analyze(b.spot, b.iv, b.dte, b.lot_size,
+                                 [leg.model_dump() for leg in b.legs])
+
+
 @router.get("/market")
 async def get_market():
     return await marketdata.market()

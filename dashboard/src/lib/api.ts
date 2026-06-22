@@ -72,6 +72,7 @@ export const api = {
   trainMeta: (body?: { name?: string; min_samples?: number }) => req<any>("POST", "/research/train", body ?? {}),
   prelive: () => get<any>("/prelive-checklist"),
   readiness: () => get<any>("/readiness"),
+  analyzeStructure: (body: unknown) => req<any>("POST", "/structure/analyze", body),
   // F&O research on the curated lake (Pillars 1-5)
   fnoLake: (start = "2026-01-01") => get<any>(`/fno/lake?start=${start}`),
   fnoAnalytics: (u: string, start = "2026-01-01") =>

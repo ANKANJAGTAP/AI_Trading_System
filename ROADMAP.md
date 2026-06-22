@@ -14,7 +14,7 @@ Merges `upgrade.md` (safety ladder) + `WORLDCLASS_FNO_PLATFORM_PLAN.md` (institu
 - ✅ **P9** — SEBI-2026 algo compliance (Algo-ID tagging, market protection, OPS limiter, static-IP/OAuth gate, audit).
 - ✅ **Pillar 1 (data platform)** — contract/expiry resolver, bhavcopy EOD lake, Timescale schema, quality jobs, research API.
 - ✅ **Ops** — daily health digest, F&O Research + Pre-Live Readiness dashboard screens.
-- ✅ Migrations 0013–0022 applied; full suite green (479 tests); paper-mode live on AWS.
+- ✅ Migrations 0013–0022 applied; full suite green (484 tests); paper-mode live on AWS.
 
 ---
 
@@ -88,7 +88,7 @@ These are the only things that stand between "paper on AWS" and "transacting rea
 - 🟡 **Phase 3 — Backtest engine** — ✅ SPAN-style scan-risk margin (`backtest/span_margin.py`), ✅ Greeks-attributed P&L (`backtest/greeks_pnl.py`), ✅ scenario/stress + Monte-Carlo / risk-of-ruin (`risk/scenario_var.py`, `backtest/monte_carlo.py`). ⬜ remaining: a full event-driven options backtester driven by a **real historical chain** (data-vendor dependency, deferred).
 - ⬜ **Phase 4 — Strategy/signal engine**: 7-step pipeline, per-index structure selection, IV/GEX routing, microstructure confirmation. *(IV-regime routing, GEX, order-book imbalance already exist in the live strategies; remaining is integration/refinement.)*
 - 🟡 **Phase 5 — Execution/risk** — ✅ options-portfolio Greeks limits, scenario-VaR/stress engine, pin/expiry controls (`risk/greeks_portfolio.py`, `risk/scenario_var.py`, `risk/expiry_control.py`); ✅ composed into `risk/structure_risk.assess_structure` and **wired into the paper F&O sim** — every structure carries net-greeks / stress-VaR / SPAN / expiry, with opt-in `fno.risk_gating` to block breaching structures. ⬜ remaining: the same gate in the live risk engine — deferred until live F&O is enabled (no-op on the current equity book).
-- ⬜ **Phase 6 — Compliance + paper-live + UX**: visual strategy builder, payoff/Greeks, sustained paper across full expiry cycles. *(UX is frontend; sustained paper is operational/time.)*
+- 🟡 **Phase 6 — Compliance + paper-live + UX** — ✅ payoff/Greeks UX (**Structure Lab**: `/structure` screen + `POST /api/structure/analyze` — expiry payoff curve, net Greeks, stress-VaR, SPAN, expiry verdict), ✅ go-live walkthrough (`GO_LIVE.md`). ⬜ remaining: a full drag-and-drop strategy *builder* + sustained paper across expiry cycles (operational/time).
 - ⬜ 🔒 **Phase 7 — Controlled live**: tiny capital, one index/strategy, scale only on evidence. *(user action — real capital.)*
 - ⬜ **Data fuel (cross-cutting)** — **deferred** (no paid vendor yet; using recorded EOD bhavcopy + paper-feed data). Paid 1-min options vendor (`dataplatform/vendors/bar_vendor.py`) + `strategies/providers.py` fundamentals/ban-list remain stubs.
 
