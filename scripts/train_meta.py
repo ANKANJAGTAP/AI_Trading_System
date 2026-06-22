@@ -35,7 +35,7 @@ async def _main(args) -> None:
             ds = await research_svc.dataset_stats()
             print(f"dataset: {ds['n_samples']} labelled trades · base win-rate {ds['base_rate']*100:.0f}%")
         res = await research_svc.train_and_register(args.name, meta_cfg=meta_cfg,
-                                                    label_mode=args.labels)
+                                                    label_mode=args.labels, cv_method=args.cv)
         if res.get("error"):
             print("ERROR:", res["error"])
             return
@@ -67,4 +67,6 @@ if __name__ == "__main__":
                    help="triple-barrier stop as a fraction (default 0.01 = 1%%); use ~= pt for balance")
     p.add_argument("--max-holding", type=int, default=24,
                    help="triple-barrier vertical/time barrier in bars (default 24)")
+    p.add_argument("--cv", choices=["expanding", "cpcv"], default="expanding",
+                   help="cross-validation: purged expanding window (default) or combinatorial purged CV")
     asyncio.run(_main(p.parse_args()))

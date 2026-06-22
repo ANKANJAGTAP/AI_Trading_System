@@ -57,7 +57,8 @@ def _select_features(samples: list[dict], all_feats: list[str], max_features: in
 
 
 async def train_and_register(name: str | None = None, min_samples: int = 80,
-                             meta_cfg: dict | None = None, label_mode: str = "realized") -> dict:
+                             meta_cfg: dict | None = None, label_mode: str = "realized",
+                             cv_method: str = "expanding") -> dict:
     """Train/validate with PURGED EXPANDING-WINDOW CV (López de Prado): the series is
     chunked sequentially; each fold trains on everything BEFORE the test chunk minus
     an embargo sample, so no future information leaks and the verdict rests on
@@ -74,6 +75,7 @@ async def train_and_register(name: str | None = None, min_samples: int = 80,
     half_life = int(cfg.get("recency_half_life_trades", 60) or 0)
     max_features = int(cfg.get("max_features", 12) or 0)
     embargo = 1
+    cv_method = cfg.get("cv_method", cv_method)
 
     if label_mode == "triple_barrier":
         from research.dataset import build_triple_barrier_dataset
@@ -95,7 +97,21 @@ async def train_and_register(name: str | None = None, min_samples: int = 80,
     # ---- purged expanding-window CV (fall back to one temporal split when small) --
     seg = len(samples) // (folds + 1)
     fold_metrics: list[dict] = []
-    if seg >= min_test_fold:
+    if cv_method == "cpcv":
+        # §10 Phase 2: Combinatorial Purged CV — many train/test paths (C(G,k)) instead
+        # of one expanding window, so the verdict rests on far more out-of-sample folds.
+        from backtest.cpcv import cpcv_splits
+        cg, ck = int(cfg.get("cpcv_groups", 6) or 6), int(cfg.get("cpcv_k_test", 2) or 2)
+        for sp in cpcv_splits(len(samples), n_groups=cg, k_test=ck, embargo=embargo):
+            tr = [samples[i] for i in sp["train"]]
+            te = [samples[i] for i in sp["test"]]
+            tw = sum(s["label"] for s in tr)
+            if len(te) < min_test_fold or tw == 0 or tw == len(tr):
+                continue
+            p = train(*to_matrix(tr, feats), class_weight=True)
+            fold_metrics.append(evaluate(p, *to_matrix(te, feats)))
+        split_desc = f"cpcv_{cg}groups_k{ck}_embargo{embargo}"
+    elif seg >= min_test_fold:
         for k in range(1, folds + 1):
             tr = samples[: max(1, k * seg - embargo)]
             te = samples[k * seg: (k + 1) * seg if k < folds else len(samples)]
