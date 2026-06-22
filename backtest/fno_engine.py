@@ -31,6 +31,7 @@ from execution.costs import CostModel
 from execution.structures import _legs_from_structure
 from research.features import signal_features
 from risk.sizing import size_structure
+from risk.structure_risk import assess_structure
 from strategies.base import PASS
 from strategies.fno import FnoContext, FnoPipeline
 from backtest.metrics import compute_metrics
@@ -101,6 +102,7 @@ async def run_fno_backtest(params, cfg) -> dict:
     fno_cfg = cfg.strategy.fno or {}
     max_lots = int(fno_cfg.get("max_lots_per_structure", 0) or 0) or None
     slip_pct = float(fno_cfg.get("slippage_pct", 1.5))   # realistic option slippage
+    risk_gating = bool(fno_cfg.get("risk_gating", False))  # §10 P5: gate structures on options risk
     target_frac, stop_frac = 0.5, 1.0
 
     fno_uni = {e["name"]: e["underlying"] for e in (cfg.data.universe or {}).get("fno", [])}
@@ -167,6 +169,7 @@ async def run_fno_backtest(params, cfg) -> dict:
                             "qty": open_s["qty"], "pnl": realized,
                             "r_multiple": round(realized / open_s["max_loss"], 3) if open_s["max_loss"] else 0.0,
                             "fees": round(open_s["entry_fees"] + exit_fees, 2), "reason": reason,
+                            "risk": open_s.get("risk"),
                             "features": open_s.get("features", {})})
                     open_s = None
                     cooldown_until = i + 1   # 1-bar cooldown
@@ -208,13 +211,27 @@ async def run_fno_backtest(params, cfg) -> dict:
                 legs.append((opt, strike, side, px))
                 entry_net += (-px if side == "BUY" else px)
                 entry_fees += cost.compute_leg("fno_options", side, qty, px)["total"]
+            # §10 Phase 5: risk-check the structure (net greeks / stress-VaR / SPAN /
+            # expiry). Always recorded on the trade; only SKIPS the structure when
+            # fno.risk_gating is enabled (default off, so results are unchanged).
+            pos_legs = [{"S": spot, "K": strike, "t": t0, "iv": iv, "opt": opt,
+                         "lot_size": 1, "qty": (qty if side == "BUY" else -qty)}
+                        for opt, strike, side, _px in legs]
+            risk = assess_structure(pos_legs, spot, dte=dte)
+            if risk_gating and risk["blocked"]:
+                continue
+            feats = signal_features("fno", ctx, confidence, res.gates,
+                                    ts.tz_convert(IST) if ts.tzinfo else ts, signal=res.signal)
+            feats.update({"risk_net_delta": risk["net_greeks"]["delta"],
+                          "risk_net_vega": risk["net_greeks"]["vega"],
+                          "risk_stress_var": risk["stress_var"],
+                          "risk_span_margin": risk["span_margin"]})
             open_s = {
                 "legs": legs, "qty": qty, "lots": lots, "type": structure["type"],
                 "expiry": expiry, "entry_net": entry_net, "entry_fees": entry_fees,
                 "max_loss": mlpl * lots,
                 "max_profit": max(0.01, step * lot - mlpl) * lots,
-                "features": signal_features("fno", ctx, confidence, res.gates,
-                                            ts.tz_convert(IST) if ts.tzinfo else ts, signal=res.signal),
+                "features": feats, "risk": risk,
             }
 
         if open_s is not None:   # square off at the last bar
@@ -228,6 +245,7 @@ async def run_fno_backtest(params, cfg) -> dict:
                            "entry": round(open_s["entry_net"], 2), "exit": 0.0, "qty": open_s["qty"],
                            "pnl": realized, "r_multiple": round(realized / open_s["max_loss"], 3) if open_s["max_loss"] else 0.0,
                            "fees": round(open_s["entry_fees"], 2), "reason": "eod",
+                           "risk": open_s.get("risk"),
                            "features": open_s.get("features", {})})
 
     metrics = compute_metrics(trades, params.starting_capital)

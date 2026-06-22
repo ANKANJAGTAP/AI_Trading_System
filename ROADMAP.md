@@ -14,7 +14,7 @@ Merges `upgrade.md` (safety ladder) + `WORLDCLASS_FNO_PLATFORM_PLAN.md` (institu
 - ✅ **P9** — SEBI-2026 algo compliance (Algo-ID tagging, market protection, OPS limiter, static-IP/OAuth gate, audit).
 - ✅ **Pillar 1 (data platform)** — contract/expiry resolver, bhavcopy EOD lake, Timescale schema, quality jobs, research API.
 - ✅ **Ops** — daily health digest, F&O Research + Pre-Live Readiness dashboard screens.
-- ✅ Migrations 0013–0022 applied; full suite green (474 tests); paper-mode live on AWS.
+- ✅ Migrations 0013–0022 applied; full suite green (479 tests); paper-mode live on AWS.
 
 ---
 
@@ -87,7 +87,7 @@ These are the only things that stand between "paper on AWS" and "transacting rea
 - 🟡 **Phase 2 — Research & validation** — ✅ triple-barrier + meta-labeling, ✅ Deflated Sharpe + PBO (`backtest/validation.py`), ✅ CPCV split generator (`backtest/cpcv.py`), ✅ sample weights — label uniqueness + time-decay (`backtest/sample_weights.py`); model registry with versioning/rollback stands in for MLflow. ⬜ remaining: feed CPCV paths into the training harness + a dev→shadow→paper promotion flow.
 - 🟡 **Phase 3 — Backtest engine** — ✅ SPAN-style scan-risk margin (`backtest/span_margin.py`), ✅ Greeks-attributed P&L (`backtest/greeks_pnl.py`), ✅ scenario/stress + Monte-Carlo / risk-of-ruin (`risk/scenario_var.py`, `backtest/monte_carlo.py`). ⬜ remaining: a full event-driven options backtester driven by a **real historical chain** (data-vendor dependency, deferred).
 - ⬜ **Phase 4 — Strategy/signal engine**: 7-step pipeline, per-index structure selection, IV/GEX routing, microstructure confirmation. *(IV-regime routing, GEX, order-book imbalance already exist in the live strategies; remaining is integration/refinement.)*
-- 🟡 **Phase 5 — Execution/risk** — ✅ options-portfolio Greeks limits (`risk/greeks_portfolio.py`), ✅ scenario-VaR / stress engine (`risk/scenario_var.py`), ✅ pin/expiry controls (`risk/expiry_control.py`); all unit-tested. ⬜ remaining: wire these gates into the live risk engine's pre-trade checks.
+- 🟡 **Phase 5 — Execution/risk** — ✅ options-portfolio Greeks limits, scenario-VaR/stress engine, pin/expiry controls (`risk/greeks_portfolio.py`, `risk/scenario_var.py`, `risk/expiry_control.py`); ✅ composed into `risk/structure_risk.assess_structure` and **wired into the paper F&O sim** — every structure carries net-greeks / stress-VaR / SPAN / expiry, with opt-in `fno.risk_gating` to block breaching structures. ⬜ remaining: the same gate in the live risk engine — deferred until live F&O is enabled (no-op on the current equity book).
 - ⬜ **Phase 6 — Compliance + paper-live + UX**: visual strategy builder, payoff/Greeks, sustained paper across full expiry cycles. *(UX is frontend; sustained paper is operational/time.)*
 - ⬜ 🔒 **Phase 7 — Controlled live**: tiny capital, one index/strategy, scale only on evidence. *(user action — real capital.)*
 - ⬜ **Data fuel (cross-cutting)** — **deferred** (no paid vendor yet; using recorded EOD bhavcopy + paper-feed data). Paid 1-min options vendor (`dataplatform/vendors/bar_vendor.py`) + `strategies/providers.py` fundamentals/ban-list remain stubs.
