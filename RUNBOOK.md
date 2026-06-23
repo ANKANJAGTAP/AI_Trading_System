@@ -108,6 +108,22 @@ support@truedata.in). The option-symbol format in `dataplatform/vendors/truedata
 is a documented best guess — verify it against your TrueData symbol master and adjust
 `truedata_symbol` if a pull returns nothing.
 
+## DhanHQ historical data (free; daily + intraday)
+
+DhanHQ's data API is free and gives daily history (to inception) + 1/5/15/30/60-min
+intraday for the last ~5 years. Creds in `.env` (`DHAN_ACCESS_TOKEN` = JWT from the Dhan
+developer portal, `DHAN_CLIENT_ID`). Backfill the minute data the bhavcopy lake lacks:
+
+    sudo docker compose exec api python scripts/dhan_backfill.py \
+      --symbols NSE:RELIANCE NSE:TCS NSE:INFY --interval 5m \
+      --from 2025-01-01 --to 2026-06-22 \
+      --scrip-master https://images.dhan.co/api-data/api-scrip-master-detailed.csv
+
+`--scrip-master` (CSV path or URL) maps each tradingsymbol to its Dhan `securityId`; for
+one symbol you can skip it and pass `--security-id`. Use `--interval day` for daily, and
+`--segment NSE_FNO --instrument OPTIDX/FUTIDX` for derivatives. If a pull returns nothing,
+check the securityId/segment against Dhan's instrument list.
+
 ## Broker adapter validation (the live gate)
 
 Before the go-live flip, prove the real Kite adapter places, polls, and reports orders
