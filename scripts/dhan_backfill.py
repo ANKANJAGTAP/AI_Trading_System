@@ -19,6 +19,7 @@ import argparse
 import asyncio
 import os
 import sys
+from datetime import date, timedelta
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -30,6 +31,17 @@ from dataplatform.vendors.dhan import (DHAN_INTERVAL, DhanHistorical,  # noqa: E
                                        dhan_to_candle_rows, parse_scrip_master)
 
 _SEG = {"NSE": "NSE_EQ", "BSE": "BSE_EQ"}     # default exchangeSegment by symbol prefix
+
+
+def _date_windows(from_date: str, to_date: str, chunk_days: int):
+    """Split [from, to] into <=chunk_days windows — Dhan caps the intraday range per call."""
+    d0, d1 = date.fromisoformat(from_date), date.fromisoformat(to_date)
+    out, start = [], d0
+    while start <= d1:
+        end = min(start + timedelta(days=chunk_days - 1), d1)
+        out.append((start.isoformat(), end.isoformat()))
+        start = end + timedelta(days=1)
+    return out
 
 
 def _load_scrip_master(src: str) -> dict:
@@ -68,18 +80,26 @@ async def _main(args) -> None:
                 print(f"[skip] {sym}: no Dhan securityId (pass --scrip-master or --security-id)")
                 continue
             seg = args.segment or _SEG.get(exch.upper(), "NSE_EQ")
-            try:
-                if daily:
-                    resp = dhan.daily(sid, seg, args.instrument, args.from_date, args.to_date)
-                else:
-                    resp = dhan.intraday(sid, seg, args.instrument, dhan_iv, args.from_date, args.to_date)
-            except Exception as exc:  # noqa: BLE001 — report transport/HTTP failures plainly
-                print(f"[fail] {sym}: {exc}")
-                continue
-            rows = dhan_to_candle_rows(resp, token, "day" if daily else args.interval)
-            n = await upsert_candles(rows)
-            total += n
-            print(f"[ok]   {sym} (token {token}, dhan {sid}): {n} bars")
+            tag = "day" if daily else args.interval
+            sym_rows = 0
+            for w_from, w_to in _date_windows(args.from_date, args.to_date, args.chunk_days):
+                resp = None
+                for attempt in range(3):
+                    try:
+                        resp = (dhan.daily(sid, seg, args.instrument, w_from, w_to) if daily
+                                else dhan.intraday(sid, seg, args.instrument, dhan_iv, w_from, w_to))
+                        break
+                    except Exception as exc:  # noqa: BLE001 — report HTTP failures plainly
+                        if "429" in str(exc) and attempt < 2:        # rate-limited -> back off + retry
+                            await asyncio.sleep(args.sleep * 5 * (attempt + 1))
+                            continue
+                        print(f"[fail] {sym} {w_from}..{w_to}: {exc}")
+                        break
+                if resp:
+                    sym_rows += await upsert_candles(dhan_to_candle_rows(resp, token, tag))
+                await asyncio.sleep(args.sleep)        # throttle between requests
+            total += sym_rows
+            print(f"[ok]   {sym} (token {token}, dhan {sid}): {sym_rows} bars")
         print(f"done: {total} candle rows upserted")
     finally:
         await close_pool()
@@ -95,4 +115,6 @@ if __name__ == "__main__":
     p.add_argument("--security-id", default="", help="override Dhan securityId (single symbol)")
     p.add_argument("--segment", default="", help="override exchangeSegment (e.g. NSE_FNO, IDX_I)")
     p.add_argument("--instrument", default="EQUITY", help="Dhan instrument type (EQUITY/INDEX/...)")
+    p.add_argument("--chunk-days", type=int, default=90, help="max date window per request (Dhan caps the intraday range)")
+    p.add_argument("--sleep", type=float, default=0.6, help="seconds between requests (avoids 429 rate-limit)")
     asyncio.run(_main(p.parse_args()))
