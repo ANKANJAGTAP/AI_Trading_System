@@ -1,7 +1,7 @@
 """
 Pluggable vendor-adapter interface.
 
-Every data source (free bhavcopy, TrueData, Global Datafeeds, Kite, ...) is a
+Every data source (free bhavcopy, Dhan, Global Datafeeds, Kite, ...) is a
 subclass that returns data in ONE canonical normalised schema, so the rest of
 the platform never cares where bytes came from. This is what keeps you
 vendor-independent.

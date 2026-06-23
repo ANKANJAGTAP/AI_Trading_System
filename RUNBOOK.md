@@ -90,24 +90,6 @@ Secrets live in the server `~/ai-trading/.env` (gitignored, never deployed over)
 - **Token encryption:** set `TOKEN_ENCRYPTION_KEY` (Fernet) so the broker token is encrypted at rest; the pre-live `token_security` probe (#21) then passes outside dev.
 - **API tokens:** set `API_TOKEN_READONLY/OPERATOR/TRADER/ADMIN` (#19) and distribute per role; the legacy single `API_AUTH_TOKEN` acts as admin.
 
-## TrueData market data (historical backfill)
-
-Credentials live in `.env` (`TRUEDATA_USERNAME` / `TRUEDATA_PASSWORD` — the login id +
-password ARE the access; there is no separate key). The `truedata` SDK ships in
-requirements (installed on image build).
-
-Backfill intraday candles the EOD bhavcopy lake lacks (this is what made intraday
-backtests return zero trades):
-
-    sudo docker compose exec api python scripts/truedata_backfill.py \
-      --symbols NSE:RELIANCE NSE:TCS NSE:INFY --interval 5m --duration "30 D"
-
-Notes: a **trial** maps to the sandbox port with a limited symbol set — full segments
-and EOD F&O option chains need TrueData to enable the right port (email
-support@truedata.in). The option-symbol format in `dataplatform/vendors/truedata.py`
-is a documented best guess — verify it against your TrueData symbol master and adjust
-`truedata_symbol` if a pull returns nothing.
-
 ## DhanHQ historical data (free; daily + intraday)
 
 DhanHQ's data API is free and gives daily history (to inception) + 1/5/15/30/60-min
@@ -122,7 +104,27 @@ developer portal, `DHAN_CLIENT_ID`). Backfill the minute data the bhavcopy lake 
 `--scrip-master` (CSV path or URL) maps each tradingsymbol to its Dhan `securityId`; for
 one symbol you can skip it and pass `--security-id`. Use `--interval day` for daily, and
 `--segment NSE_FNO --instrument OPTIDX/FUTIDX` for derivatives. If a pull returns nothing,
-check the securityId/segment against Dhan's instrument list.
+check the securityId/segment against Dhan's instrument list. Large intraday ranges are
+auto-chunked (`--chunk-days`, default 90) and throttled (`--sleep`, default 0.6) to stay
+under Dhan's per-call range and rate limits.
+
+## DhanHQ option chain (live snapshot; real greeks)
+
+Dhan's option chain is a **live** snapshot (needs the Data API plan, not the free
+tier): `POST /optionchain` returns per-strike CE/PE legs with greeks
+(delta/theta/gamma/vega), IV, OI, volume, LTP and best bid/ask; `POST
+/optionchain/expirylist` gives the active expiries. It forward-records the chain
+(there are no historical chains), so run it during market hours. Dhan caps this to
+**one request every 3 seconds** — the script throttles for you (`--sleep`, default 3).
+
+    sudo docker compose exec api python scripts/dhan_chain_snapshot.py \
+      --underlyings NIFTY FINNIFTY SENSEX --expiries 2
+
+Writes a timestamped CSV (greeks/IV/OI/bid-ask per leg) under `data/option_chains/`.
+Add `--lake` to also push canonical EOD rows through the ingestion pipeline. Index
+security ids default to Dhan's annexure (NIFTY=13, BANKNIFTY=25, FINNIFTY=27,
+SENSEX=51, IDX_I); override any that differ with `--scrip NIFTY=13:IDX_I`. A DH-806 /
+DH-902 error means the Data API plan isn't active on the token.
 
 ## Broker adapter validation (the live gate)
 

@@ -1,7 +1,7 @@
 """
 Vendor field-map normaliser.
 
-Every paid vendor (TrueData, Global Datafeeds, ...) returns option/future bars
+Every paid vendor (Dhan option chain, Global Datafeeds, ...) returns option/future bars
 with its OWN column names and codes. A FieldMap declares how that vendor's
 columns map to the canonical EOD schema, and `normalize()` does the conversion.
 So onboarding a new vendor is: define a FieldMap (data), not write new code.

@@ -3,7 +3,7 @@ Global Datafeeds (GDFL) adapter — authorised NSE/BSE/MCX data vendor.
 
 Transport uses GDFL's Historical Data REST API with an API key from the
 environment (GDFL_API_KEY, optional GDFL_ENDPOINT). Structure mirrors the
-TrueData adapter; only the per-symbol fetch and symbology differ.
+other bar-vendor adapters; only the per-symbol fetch and symbology differ.
 
 ⚠️ Confirm the endpoint, response fields and symbology against your GDFL plan;
 the defaults are documented best guesses flagged verify.

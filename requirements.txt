@@ -18,8 +18,9 @@ psycopg2-binary>=2.9      # dataplatform OperationalStore -> TimescaleDB writes
 pyarrow>=15.0             # dataplatform Parquet lake (read/write)
 duckdb>=0.10              # dataplatform lake queries (features/backtest research API)
 
-# --- Market-data vendor (optional; lazy-imported only when TrueData creds are set) ---
-truedata                  # newer TrueData SDK: `from truedata import TD_hist, TD_live` (Python 3.10+)
+# --- Market-data vendor: DhanHQ (historical bars + option chain) ---
+# No SDK needed — the Dhan REST adapters use `requests` (above), lazy-imported
+# only when DHAN_ACCESS_TOKEN / DHAN_CLIENT_ID are set.
 
 # --- API / async ---
 # Cap fastapi: 0.116+ pulls starlette 1.x, which breaks include_router route

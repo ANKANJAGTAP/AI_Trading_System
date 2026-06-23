@@ -86,9 +86,11 @@ The bhavcopy parsers handle both NSE's **UDiFF** common bhavcopy and the
 **Kite** is for live + *recent* candles (not deep option chains):
 `KiteAdapter(api_key, access_token).historical_candles(token, start, end)`.
 
-**Paid vendors** (TrueData / Global Datafeeds) for deep 1-min options history:
-add an adapter subclassing `vendors.base.VendorAdapter` returning the canonical
-schema — nothing else changes.
+**DhanHQ** is the primary vendor: `dhan.py` (historical daily + intraday OHLC,
+free) and `dhan_chain.py` (live option chain with real greeks/IV/OI/bid-ask, Data
+API plan). **Global Datafeeds** remains as an alternate paid chain adapter. Adding
+another vendor is just an adapter subclassing `vendors.base.VendorAdapter` (or
+`bar_vendor.BarVendorAdapter`) returning the canonical schema — nothing else changes.
 
 ## Storage backends
 

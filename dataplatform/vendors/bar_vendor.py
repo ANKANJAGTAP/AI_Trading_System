@@ -1,5 +1,5 @@
 """
-Base class for bar/snapshot vendors (TrueData, Global Datafeeds, ...).
+Base class for bar/snapshot vendors (Dhan option chain, Global Datafeeds, ...).
 
 Subclasses provide a FieldMap and implement `_fetch_raw_chain` (the transport
 that calls the vendor SDK/REST using the user's own credentials). The base
