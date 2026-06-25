@@ -62,3 +62,28 @@ def test_parse_bse_udiff():
     assert set(df["exchange"]) == {"BSE"}
     assert set(df["underlying"]) == {"SENSEX"}
     assert len(df) == 2
+
+
+# --- untraded contracts: zero OHLC + real settlement (the bhavcopy quirk) ---
+UDIFF_UNTRADED = (
+    "TradDt,TckrSymb,FinInstrmTp,OptnTp,XpryDt,StrkPric,"
+    "OpnPric,HghPric,LwPric,ClsPric,SttlmPric,TtlTradgVol,OpnIntrst,ChngInOpnIntrst\n"
+    "2024-07-25,NIFTY,IDO,CE,2024-07-25,22050,0,0,0,1404.10,2064.85,0,455,0\n"   # untraded, has OI
+    "2024-07-25,NIFTY,IDO,PE,2024-07-25,26000,0,0,0,0,0,0,0,0\n"                 # fully dead
+    "2024-07-25,NIFTY,IDO,CE,2024-07-25,24000,150,180,140,160,160,5000,300000,-400\n"  # traded
+)
+
+
+def test_parse_udiff_coalesces_untraded():
+    df = parse_udiff_csv(UDIFF_UNTRADED)
+    # untraded strike is marked at the settlement price, OI preserved
+    ce = df[df["strike"] == 22050].iloc[0]
+    assert ce["open"] == ce["high"] == ce["low"] == ce["close"] == 2064.85
+    assert ce["oi"] == 455
+    # traded strike is untouched (real OHLC)
+    t = df[df["strike"] == 24000].iloc[0]
+    assert t["open"] == 150 and t["high"] == 180 and t["low"] == 140 and t["close"] == 160
+    # every row is internally consistent -> passes the quality gate
+    assert (df["high"] >= df[["open", "close"]].max(axis=1)).all()
+    assert (df["low"] <= df[["open", "close"]].min(axis=1)).all()
+    assert not (df["close"] > df["high"]).any() and not (df["open"] < df["low"]).any()

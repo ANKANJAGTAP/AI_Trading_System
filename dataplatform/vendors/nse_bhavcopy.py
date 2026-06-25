@@ -58,6 +58,31 @@ def _parse_date_any(s: str) -> dt.date:
     return dt.datetime.strptime(s[:10], "%Y-%m-%d").date()
 
 
+def coalesce_untraded_ohlc(out: pd.DataFrame) -> pd.DataFrame:
+    """Make EOD option-chain bars internally consistent for the lake. Pure.
+
+    NSE bhavcopy reports UNTRADED contracts (volume 0) with degenerate OHLC
+    (zeros) but a real settlement mark — so `close`/`settle` sit outside the
+    [low,high]=[0,0] band and a naive quality check rejects the whole day. We:
+      1. mark each untraded bar at its settlement price (fallback close), so an
+         illiquid strike still carries a sane EOD price (its OI is preserved), and
+      2. guarantee `high >= max(o,c)` and `low <= min(o,c)` on every row, so
+         open/close always lie within [low,high].
+    Traded bars keep their real open/close; only the high/low envelope is widened
+    if a vendor quirk left it inconsistent.
+    """
+    price = ["open", "high", "low", "close"]
+    out[price] = out[price].astype("float64")          # avoid int64/float dtype clash on assign
+    untraded = out["volume"].fillna(0) <= 0
+    if untraded.any():
+        mark = out["settle"].where(out["settle"] > 0, out["close"]).astype("float64")
+        for c in price:
+            out.loc[untraded, c] = mark[untraded]
+    out["high"] = out[price].max(axis=1)
+    out["low"] = out[price].min(axis=1)
+    return out
+
+
 # --------------------------------------------------------------------------- #
 # PURE parsers (testable with CSV fixtures, no network)
 # --------------------------------------------------------------------------- #
@@ -86,7 +111,7 @@ def parse_udiff_csv(text: str) -> pd.DataFrame:
     out["oi"] = pd.to_numeric(keep["OpnIntrst"], errors="coerce").fillna(0).astype("int64")
     out["oi_change"] = pd.to_numeric(keep["ChngInOpnIntrst"], errors="coerce").fillna(0).astype("int64")
     out["source"] = "nse_bhavcopy_udiff"
-    return validate_canonical(out)
+    return validate_canonical(coalesce_untraded_ohlc(out))
 
 
 def parse_legacy_csv(text: str) -> pd.DataFrame:
@@ -114,7 +139,7 @@ def parse_legacy_csv(text: str) -> pd.DataFrame:
     out["oi"] = pd.to_numeric(keep["OPEN_INT"], errors="coerce").fillna(0).astype("int64")
     out["oi_change"] = pd.to_numeric(keep["CHG_IN_OI"], errors="coerce").fillna(0).astype("int64")
     out["source"] = "nse_bhavcopy_legacy"
-    return validate_canonical(out)
+    return validate_canonical(coalesce_untraded_ohlc(out))
 
 
 def _unzip_first_csv(blob: bytes) -> str:
