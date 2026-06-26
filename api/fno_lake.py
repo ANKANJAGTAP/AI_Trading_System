@@ -25,6 +25,7 @@ log = get_logger("api_fno_lake")
 
 TA_FEATURES = ["ema_20", "rsi_14", "atr_pct_14", "macd_hist", "rvol_20", "bb_pctb_20"]
 DEFAULT_UNDERLYINGS = ("NIFTY", "FINNIFTY", "SENSEX")
+_STRIKE_STEP = {"BANKNIFTY": 100.0, "SENSEX": 100.0}   # strike interval; NIFTY/FINNIFTY = 50 (default)
 
 
 def _d(s):
@@ -139,7 +140,8 @@ def _backtest_sync(underlying, start, end, capital, per_trade_pct) -> dict:
         ctx = MarketContext(
             underlying, date, float(spot), feats, ivr, atm,
             chain[["opt_type", "strike", "close", "oi", "volume"]],
-            dte=max((expiry - date).days, 1), expiry=expiry, lot_size=lot_size, step=50.0)
+            dte=max((expiry - date).days, 1), expiry=expiry, lot_size=lot_size,
+            step=_STRIKE_STEP.get(underlying, 50.0))
         d = decide(ctx, dcfg, risk_state, meta_confidence=None)
         if d.accepted:
             stats["accepted"] += 1
