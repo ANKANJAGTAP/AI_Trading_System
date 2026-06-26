@@ -105,6 +105,59 @@ def _session_adapter(sleep: float, warm_pause: float):
     return _SessionBhavcopy()
 
 
+def _bse_session_adapter(sleep: float, warm_pause: float):
+    """BSE SENSEX bhavcopy via a cookie-warmed session (BSE is UDiFF-only, no legacy)."""
+    import requests
+    from dataplatform.vendors.bse_bhavcopy import BSEBhavcopyAdapter
+
+    class _SessionBSE(BSEBhavcopyAdapter):
+        def __init__(self):
+            super().__init__()
+            self._s = None
+
+        def _warm(self) -> None:
+            s = requests.Session()
+            s.headers.update({
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                              "(KHTML, like Gecko) Chrome/124.0 Safari/537.36",
+                "Accept": "*/*", "Accept-Language": "en-US,en;q=0.9"})
+            try:
+                s.get("https://www.bseindia.com", timeout=30)
+                time.sleep(warm_pause)
+            except Exception:  # noqa: BLE001 — cookies may still be set; let the GET decide
+                pass
+            self._s = s
+
+        def _download(self, url: str) -> bytes:
+            if self._s is None:
+                self._warm()
+            resp = None
+            for attempt in range(4):
+                try:
+                    resp = self._s.get(url, timeout=60,
+                                       headers={"Referer": "https://www.bseindia.com/"})
+                except Exception:  # noqa: BLE001 — transient network; back off + retry
+                    if attempt == 3:
+                        raise
+                    time.sleep(2 * (attempt + 1))
+                    continue
+                if resp.status_code == 200:
+                    return resp.content
+                if resp.status_code == 404:                 # not published (holiday) -> miss
+                    raise FileNotFoundError(f"404 {url}")
+                if resp.status_code in (401, 403):
+                    self._warm()
+                time.sleep(2 * (attempt + 1))
+            raise RuntimeError(f"HTTP {resp.status_code if resp is not None else '??'} for {url}")
+
+        def fetch_eod_fno(self, trade_date: dt.date):
+            df = super().fetch_eod_fno(trade_date)
+            time.sleep(sleep)
+            return df
+
+    return _SessionBSE()
+
+
 def main(args) -> int:
     from dataplatform.ingestion.eod_pipeline import EODIngestionPipeline
 
@@ -117,8 +170,10 @@ def main(args) -> int:
         print("ERROR: --from must be on/before --to")
         return 2
 
-    pipe = EODIngestionPipeline(_session_adapter(args.sleep, args.warm_pause))
-    print(f"bhavcopy backfill: NIFTY+FINNIFTY  {start}..{end}  "
+    make = _bse_session_adapter if args.exchange == "bse" else _session_adapter
+    syms = "SENSEX" if args.exchange == "bse" else "NIFTY+FINNIFTY+BANKNIFTY"
+    pipe = EODIngestionPipeline(make(args.sleep, args.warm_pause))
+    print(f"{args.exchange.upper()} bhavcopy backfill: {syms}  {start}..{end}  "
           f"({len(month_windows(start, end))} months) -> lake @ "
           f"{os.environ.get('DATAPLATFORM_HOME', '~/.aitrading_data')}")
 
@@ -133,8 +188,9 @@ def main(args) -> int:
         print(f"[{mstart:%Y-%m}] good_days={ok:2d} quarantined={quar:2d} rows={run.total_rows:7d}")
     print(f"\ndone: {g_rows} rows · {g_ok} good days · {g_quar} quarantined")
     if g_rows == 0:
-        print("WARNING: 0 rows — NSE likely blocked this IP (403) or the range has no "
-              "trading days. Try a residential IP and sync the lake dir up.")
+        print(f"WARNING: 0 rows — {args.exchange.upper()} likely blocked this IP (403), or the "
+              "URL pattern needs updating, or the range has no trading days. Try a residential "
+              "IP and sync the lake dir up, or verify the bhavcopy URL.")
         return 1
     return 0
 
@@ -142,9 +198,11 @@ def main(args) -> int:
 if __name__ == "__main__":
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    p.add_argument("--exchange", choices=["nse", "bse"], default="nse",
+                   help="nse = NIFTY/FINNIFTY/BANKNIFTY (default); bse = SENSEX")
     p.add_argument("--from", dest="from_date", required=True, help="YYYY-MM-DD")
     p.add_argument("--to", dest="to_date", required=True, help="YYYY-MM-DD")
     p.add_argument("--sleep", type=float, default=0.8, help="seconds between days (politeness)")
     p.add_argument("--warm-pause", dest="warm_pause", type=float, default=1.0,
-                   help="seconds to wait after warming NSE cookies")
+                   help="seconds to wait after warming exchange cookies")
     raise SystemExit(main(p.parse_args()))

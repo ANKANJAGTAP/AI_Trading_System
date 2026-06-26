@@ -16,15 +16,25 @@ import zipfile
 import pandas as pd
 
 from .base import VendorAdapter, validate_canonical
-from .nse_bhavcopy import _parse_date_any  # reuse robust date parsing
+from .nse_bhavcopy import _parse_date_any, coalesce_untraded_ohlc  # robust dates + untraded-OHLC fix
 
 _PHASE_A_BSE = {"SENSEX"}
 
 
 def bse_udiff_url(d: dt.date) -> str:
     # Verify against BSE; pattern mirrors the exchange-common UDiFF naming.
+    # BSE serves the UDiFF derivatives bhavcopy as a plain .CSV (uppercase ext).
     return (f"https://www.bseindia.com/download/Bhavcopy/Derivative/"
-            f"BhavCopy_BSE_FO_0_0_0_{d:%Y%m%d}_F_0000.csv.zip")
+            f"BhavCopy_BSE_FO_0_0_0_{d:%Y%m%d}_F_0000.CSV")
+
+
+def _bse_bytes_to_csv(blob: bytes) -> str:
+    """BSE bhavcopy is usually a plain CSV but is sometimes zipped — handle both."""
+    if blob[:2] == b"PK":                       # zip magic number
+        with zipfile.ZipFile(io.BytesIO(blob)) as z:
+            name = next(n for n in z.namelist() if n.lower().endswith(".csv"))
+            return z.read(name).decode("utf-8", errors="replace")
+    return blob.decode("utf-8", errors="replace")
 
 
 def parse_bse_udiff_csv(text: str) -> pd.DataFrame:
@@ -51,7 +61,7 @@ def parse_bse_udiff_csv(text: str) -> pd.DataFrame:
     out["oi"] = pd.to_numeric(keep["OpnIntrst"], errors="coerce").fillna(0).astype("int64")
     out["oi_change"] = pd.to_numeric(keep["ChngInOpnIntrst"], errors="coerce").fillna(0).astype("int64")
     out["source"] = "bse_bhavcopy_udiff"
-    return validate_canonical(out)
+    return validate_canonical(coalesce_untraded_ohlc(out))
 
 
 class BSEBhavcopyAdapter(VendorAdapter):
@@ -67,10 +77,7 @@ class BSEBhavcopyAdapter(VendorAdapter):
     def fetch_eod_fno(self, trade_date: dt.date) -> pd.DataFrame:
         try:
             blob = self._download(bse_udiff_url(trade_date))
-            with zipfile.ZipFile(io.BytesIO(blob)) as z:
-                name = next(n for n in z.namelist() if n.lower().endswith(".csv"))
-                text = z.read(name).decode("utf-8", errors="replace")
-            return parse_bse_udiff_csv(text)
+            return parse_bse_udiff_csv(_bse_bytes_to_csv(blob))
         except Exception as e:  # noqa: BLE001
             raise RuntimeError(
                 f"BSE bhavcopy fetch failed for {trade_date}: {e}. "
