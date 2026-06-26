@@ -230,6 +230,8 @@ async def build_fno_context(adapter, governor, name: str, underlying_key: str,
 
         direction = await _daily_direction(underlying_token, spot)
         ce_oi, pe_oi = float(ce_q.get("oi") or 0), float(pe_q.get("oi") or 0)
+        atm_oi = ce_oi + pe_oi
+        atm_volume = float(ce_q.get("volume") or 0) + float(pe_q.get("volume") or 0)
         pcr = (pe_oi / ce_oi) if ce_oi > 0 else 1.0
         pcr_signal = "bullish" if pcr > 1.2 else ("bearish" if pcr < 0.8 else "neutral")
 
@@ -271,7 +273,7 @@ async def build_fno_context(adapter, governor, name: str, underlying_key: str,
             spot=spot, iv=round(iv, 4), iv_rank=round(ivr, 1), dte=dte, direction=direction,
             lot_size=int(ce["lot_size"]), expiry=expiry, is_banned=is_banned, strike_step=step,
             oi_signal=oi_signal, risk_free=risk_free, iv_chg_5d=round(iv_chg_5d, 1),
-            is_expiry_day=is_expiry_day,
+            is_expiry_day=is_expiry_day, atm_oi=atm_oi, atm_volume=atm_volume,
             extra={"atm": atm, "pcr": round(pcr, 2), "pcr_signal": pcr_signal,
                    "oi_bias": oi_bias, "ce_buildup": ce_buildup, "pe_buildup": pe_buildup,
                    "ce_token": ce["instrument_token"], "pe_token": pe["instrument_token"]},

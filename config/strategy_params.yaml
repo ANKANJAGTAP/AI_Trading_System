@@ -63,9 +63,11 @@ fno:                             # 5.2
   width_steps: 2                 # wing width in strike steps (100pts NIFTY): 1-step
                                  # wings lose 15-20% of credit to fees; ~2 is the
                                  # cost-efficiency sweet spot per spread-width research
-  credit_underlyings: ["NIFTY", "BANKNIFTY"]   # premium selling = INDEX only (tight
-                                 # books, no earnings shocks); stocks may only take
-                                 # the rare low-IV directional debit
+  credit_underlyings: ["NIFTY", "BANKNIFTY", "FINNIFTY"]   # premium selling = INDEX only
+                                 # (tight books, no earnings shocks); stocks may only take
+                                 # the rare low-IV directional debit. NIFTY validated;
+                                 # FINNIFTY validated WITH the 20k liquidity floor below;
+                                 # BANKNIFTY pending backfill+validation; SENSEX needs BSE data.
   exits:                         # structure management on COMBINED premium P&L
     target_fraction: 0.5         # book at 50% of (fill-based) max profit
     stop_fraction: 0.5           # cut at 50% of (fill-based) max loss — never ride to full
@@ -132,6 +134,10 @@ fno:                             # 5.2
     require_oi: true
     require_volume: true
     require_tight_spread: true
+    min_atm_oi: 5000             # live gate: reject illiquid ATM books (wide spreads -> cost drag)
+    min_atm_volume: 0            # 0 = OI-only floor
+    per_underlying:              # backtest-validated overrides; symbol absent -> global min_atm_oi
+      FINNIFTY: 20000            # FINNIFTY needs a higher floor to be cost-positive (+163k vs -45k)
 
 swing_stocks:                    # 5.3
   universe:

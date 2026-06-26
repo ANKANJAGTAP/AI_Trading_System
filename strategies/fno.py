@@ -29,7 +29,22 @@ class FnoContext:
     risk_free: float = 0.065
     iv_chg_5d: float = 0.0       # ATM IV % change over ~5 sessions (vol-direction guard)
     is_expiry_day: bool = False  # TODAY is an expiry date for this underlying (any series)
+    atm_oi: float = 0.0          # ATM CE+PE open interest (liquidity gate)
+    atm_volume: float = 0.0      # ATM CE+PE traded volume (liquidity gate)
     extra: dict = field(default_factory=dict)
+
+
+def liquidity_floor(liq_cfg: dict, symbol: str) -> tuple[float, float]:
+    """(min_atm_oi, min_atm_volume) for a symbol. A per-underlying entry overrides the
+    global floor; 0 (or missing) disables that check. Pure — unit-tested.
+
+    Backtest-validated (FINNIFTY): a min-ATM-OI floor flipped it +₹163k vs −₹45k, by
+    skipping illiquid strikes whose wide spreads make costs eat the edge."""
+    liq = liq_cfg or {}
+    per = liq.get("per_underlying") or {}
+    min_oi = float(per.get(symbol, liq.get("min_atm_oi", 0)) or 0)
+    min_vol = float(liq.get("min_atm_volume", 0) or 0)
+    return min_oi, min_vol
 
 
 def _px(spot, K, iv, dte, r, opt):
@@ -196,6 +211,18 @@ class FnoPipeline:
             if not g.add("credit_universe", name_ok, 1.0 if name_ok else 0.0,
                          allowed=sorted(allowed)):
                 return g.reject("premium selling restricted to index underlyings")
+
+        # 4c. liquidity gate (backtest-validated): reject illiquid ATM books — wide
+        # spreads make transaction costs eat the edge (FINNIFTY: a min-ATM-OI floor
+        # flipped it +163k vs -45k). Per-underlying floor overrides the global; 0 disables.
+        min_oi, min_vol = liquidity_floor(p.get("liquidity", {}) or {},
+                                          instrument.get("tradingsymbol") or "")
+        if min_oi > 0 or min_vol > 0:
+            liq_ok = ctx.atm_oi >= min_oi and ctx.atm_volume >= min_vol
+            if not g.add("liquidity", liq_ok, 1.0 if liq_ok else 0.0,
+                         atm_oi=ctx.atm_oi, atm_vol=ctx.atm_volume, min_oi=min_oi, min_vol=min_vol):
+                return g.reject(f"liquidity: atm_oi={ctx.atm_oi:.0f} (<{min_oi:.0f}) / "
+                                f"atm_vol={ctx.atm_volume:.0f} (<{min_vol:.0f})")
 
         # 5. structure build (NO naked selling — finite max loss); deltas and wing
         # width from config (delta.credit_short_leg / delta.condor_leg / width_steps).

@@ -21,7 +21,7 @@ import pandas as pd
 
 from .base import VendorAdapter, validate_canonical
 
-_PHASE_A_NSE = {"NIFTY", "FINNIFTY"}
+_PHASE_A_NSE = {"NIFTY", "FINNIFTY", "BANKNIFTY"}
 
 # Browser-like headers NSE expects. A real run should first GET https://www.nseindia.com
 # to obtain cookies, then reuse the session for the archive request.
