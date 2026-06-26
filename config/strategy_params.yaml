@@ -63,11 +63,12 @@ fno:                             # 5.2
   width_steps: 2                 # wing width in strike steps (100pts NIFTY): 1-step
                                  # wings lose 15-20% of credit to fees; ~2 is the
                                  # cost-efficiency sweet spot per spread-width research
-  credit_underlyings: ["NIFTY", "BANKNIFTY", "FINNIFTY"]   # premium selling = INDEX only
-                                 # (tight books, no earnings shocks); stocks may only take
-                                 # the rare low-IV directional debit. NIFTY validated;
-                                 # FINNIFTY validated WITH the 20k liquidity floor below;
-                                 # BANKNIFTY pending backfill+validation; SENSEX needs BSE data.
+  credit_underlyings: ["NIFTY", "FINNIFTY"]   # premium selling = INDEX only (tight books,
+                                 # no earnings shocks); stocks may only take the rare low-IV
+                                 # directional debit. Both are forward-OOS validated. BANKNIFTY
+                                 # REMOVED — failed forward-OOS (+515k IS -> -995k OOS, 16% win,
+                                 # -20% DD); short-premium on BANKNIFTY's trends gets run over.
+                                 # SENSEX needs BSE data before it can be validated.
   exits:                         # structure management on COMBINED premium P&L
     target_fraction: 0.5         # book at 50% of (fill-based) max profit
     stop_fraction: 0.5           # cut at 50% of (fill-based) max loss — never ride to full
