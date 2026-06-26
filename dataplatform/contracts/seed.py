@@ -54,6 +54,21 @@ SEED_SPECS: list[SpecRecord] = [
     SpecRecord("FINNIFTY", "weekly_available", "false", _d("2024-11-20"), None,
                source="nse_weekly_discontinuation_nov2024", verify=False),
 
+    # ----------------------- BANKNIFTY (NSE) — VERIFIED -----------------------
+    # Lot: 25 -> 15 (2023-06-30, NSE circular) -> 30 (2024-11-20, SEBI Nov-2024
+    # revision). A late-2025 revision is reported ambiguously (30 vs 35) — the open
+    # record is flagged verify=True pending the exact circular. BANKNIFTY weeklies
+    # were withdrawn 2024-11-20 (NSE single-weekly rule): monthly-only since.
+    SpecRecord("BANKNIFTY", "lot_size", "25", _d("2023-01-01"), _d("2023-06-29"),
+               source="nse", verify=False),
+    SpecRecord("BANKNIFTY", "lot_size", "15", _d("2023-06-30"), _d("2024-11-19"),
+               source="nse_circular_jun2023", verify=False),
+    SpecRecord("BANKNIFTY", "lot_size", "30", _d("2024-11-20"), None,
+               source="nse_circular_nov2024", verify=False),   # re-check late-2025 revision (30 vs 35)
+    SpecRecord("BANKNIFTY", "tick_size", "0.05", _d("2016-05-27"), None, verify=False),
+    SpecRecord("BANKNIFTY", "weekly_available", "false", _d("2024-11-20"), None,
+               source="nse_weekly_removal_nov2024", verify=False),
+
     # ----------------------- SENSEX (BSE) — VERIFIED -----------------------
     # BSE relaunched Sensex F&O 2023-05-15 with lot 10 (cut from 15); raised to
     # 20 on 2024-11-20 and unchanged through the Jan-2026 NSE revision.
