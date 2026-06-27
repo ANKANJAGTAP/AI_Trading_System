@@ -139,6 +139,10 @@ fno:                             # 5.2
     min_atm_volume: 0            # 0 = OI-only floor
     per_underlying:              # backtest-validated overrides; symbol absent -> global min_atm_oi
       FINNIFTY: 20000            # FINNIFTY needs a higher floor to be cost-positive (+163k vs -45k)
+  risk_gating:                   # §10 P5: block structures breaching options-risk limits (opt-in)
+    enabled: false               # default OFF -> records net-greeks/stress-VaR/SPAN on the trail, never blocks
+    max_stress_loss: 0           # 0 = no stress cap; e.g. 60000 blocks if the spot/IV stress loss < -60k
+    greek_limits: {}             # e.g. {delta: 80, vega: 5000} -> block when |net greek| exceeds the cap
 
 swing_stocks:                    # 5.3
   universe:

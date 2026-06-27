@@ -47,6 +47,15 @@ def liquidity_floor(liq_cfg: dict, symbol: str) -> tuple[float, float]:
     return min_oi, min_vol
 
 
+def structure_risk_legs(structure: dict, spot: float, t: float, iv: float) -> list[dict]:
+    """Built structure -> assess_structure leg dicts (signed qty: BUY=+1 / SELL=-1 lot).
+    Used to risk-check net greeks / stress-VaR / SPAN / expiry before entry. Pure."""
+    from execution.structures import _legs_from_structure
+    return [{"S": spot, "K": float(strike), "t": t, "iv": iv, "opt": opt,
+             "lot_size": 1, "qty": (1 if side == "BUY" else -1)}
+            for opt, strike, side in _legs_from_structure(structure)]
+
+
 def _px(spot, K, iv, dte, r, opt):
     return bs_price(spot, K, max(dte, 0) / 365.0, r, iv, opt)
 
@@ -258,6 +267,25 @@ class FnoPipeline:
         g.add("greeks", greeks_ok, 1.0 if lo <= dlt <= hi else 0.5, delta=round(dlt, 3), target=[lo, hi])
         if not greeks_ok:
             return g.reject(f"leg delta {dlt:.2f} far from target {[lo, hi]}")
+
+        # 6b. portfolio options-risk gate (§10 Phase 5): net-greeks / stress-VaR / SPAN /
+        # expiry on the assembled structure. ALWAYS recorded on the trail; only BLOCKS
+        # when fno.risk_gating is enabled (default off -> behaviour unchanged), matching
+        # the paper-sim gate so live and backtest agree (#24 provenance).
+        rg = p.get("risk_gating") or {}
+        rg = rg if isinstance(rg, dict) else {"enabled": bool(rg)}
+        from risk.structure_risk import assess_structure
+        srisk = assess_structure(
+            structure_risk_legs(structure, ctx.spot, t, ctx.iv), ctx.spot, dte=ctx.dte,
+            greek_limits=rg.get("greek_limits"), max_stress_loss=rg.get("max_stress_loss"))
+        ng = srisk.get("net_greeks", {})
+        if not g.add("structure_risk", not (bool(rg.get("enabled", False)) and srisk["blocked"]),
+                     0.9 if not srisk["blocked"] else 0.0,
+                     net_delta=round(ng.get("delta", 0.0), 2),
+                     stress_var=round(srisk.get("stress_var", 0.0), 0),
+                     span=round(srisk.get("span_margin", 0.0), 0),
+                     expiry=srisk.get("expiry_action"), reason=srisk.get("reason", "")):
+            return g.reject(f"structure risk: {srisk['reason']}")
 
         # 7. risk: max loss finite (sleeve/portfolio ceilings applied by the Risk Engine)
         g.add("risk_finite", True, 0.9, max_loss_per_lot=structure["max_loss_per_lot"])
