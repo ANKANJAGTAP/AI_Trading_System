@@ -75,6 +75,30 @@ Or use the dashboard Controls / Risk screens.
 - Containers: `sudo docker compose ps` / `logs -f api` / `logs -f engine`.
 - Broker vs book divergence: the reconciliation loop (P1#11) grades + persists mismatches and blocks/alerts; check the Pre-Live Readiness screen.
 
+## Daily paper operation (NIFTY / FINNIFTY)
+
+The book trades **paper** and **auto-arms at open**: `_paper_autorun_enable` sets
+`orchestrator_enabled` only when `execution_mode == simulated_fill`, so live can never
+silently arm and no manual "start" is needed. The daily requirement is a **valid broker
+token** (the live tick feed needs it) and a healthy engine. Sleeve = credit spreads on
+**NIFTY + FINNIFTY only** — the forward-OOS-validated universe (BANKNIFTY/SENSEX failed
+OOS and are excluded). The meta-filter does not improve it (AUC 0.517), so it runs as-is.
+
+Each trading morning (Kite access tokens roll ~06:00 IST). All read-only; **you** refresh
+the token in the server `.env` if it's stale — no script here touches it:
+
+```bash
+# 1) Token / feed health — every endpoint must print [OK]; a [FAIL] = refresh the token yourself
+ssh -i ~/.ssh/ats-key ubuntu@43.205.112.232 'cd ai-trading && sudo docker compose exec -T api python scripts/diag_kite_endpoints.py'
+# 2) Readiness + P&L  (orchestrator_enabled flips True after 09:15; kill_switch_active must be False)
+ssh -i ~/.ssh/ats-key ubuntu@43.205.112.232 'cd ai-trading && sudo docker compose exec -T api python scripts/pnl_report.py'
+```
+
+During the session (after 09:25 IST, when marks are trusted) re-run `pnl_report.py` to
+watch open structures accrue unrealized MTM — that is also the live confirmation the
+structure-marking path fires. The engine writes + emails the full day journal at 17:00 IST
+(`_journal_job`); the weekly edge-decay report goes out Friday evening.
+
 ## Secret rotation
 
 Secrets live in the server `~/ai-trading/.env` (gitignored, never deployed over). Rotate:
