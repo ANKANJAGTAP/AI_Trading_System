@@ -43,3 +43,17 @@ def test_split_net_buckets_by_date():
     trades = [{"ts": "2025-07-01 09:30:00", "pnl": 100.0},
               {"ts": "2025-09-01 10:00:00", "pnl": -40.0}]
     assert cb.split_net(trades, dt.date(2025, 8, 1)) == (100.0, -40.0)
+
+
+def test_fade_mode_inverts_pnl_sign():
+    s = cb.compute_signals(_uptrend())
+    longs = cb.backtest_symbol(s, k=3, atr_mult=1.5, reward_r=2.0, cost_bps=10, capital=100000, mode="breakout")
+    fades = cb.backtest_symbol(s, k=3, atr_mult=1.5, reward_r=2.0, cost_bps=10, capital=100000, mode="fade")
+    assert sum(t["pnl"] for t in longs) > 0        # long a clean uptrend -> wins
+    assert sum(t["pnl"] for t in fades) < 0        # short (fade) the same uptrend -> loses
+
+
+def test_min_rvol_gate_blocks_entries():
+    s = cb.compute_signals(_uptrend())
+    assert cb.backtest_symbol(s, k=3, atr_mult=1.5, reward_r=2.0, cost_bps=10,
+                              capital=100000, min_rvol=100.0) == []

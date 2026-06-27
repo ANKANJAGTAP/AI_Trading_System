@@ -15,9 +15,10 @@ Exit: ATR stop (gap-aware, stop-first), R-multiple target, and EOD square-off (i
 Costs are modelled (round-trip bps on notional) — the ORB lesson: gross != net.
 
     sudo docker compose exec -T api python scripts/confluence_breakout.py \
-        --from 2025-07-01 --to 2026-06-20 --k-values 4,5,6,7,8
+        --from 2025-07-01 --to 2026-06-20 --k-values 4,5,6,7,8 [--mode fade] [--min-rvol 3]
 
-Long-only, single-name; the point is the validated verdict, not a live wiring.
+Modes: breakout (long the break) or fade (short it, bet it reverts). --min-rvol gates on
+'in-play' intensity. Single-name research harness — a validated verdict, not live wiring.
 """
 from __future__ import annotations
 
@@ -79,41 +80,58 @@ def compute_signals(df: pd.DataFrame) -> pd.DataFrame:
 
     out["confluence"] = sig.fillna(False).astype(int).sum(axis=1)
     out["bars_left"] = out.groupby("day").cumcount(ascending=False)   # 0 on the last bar of the day
+    out["rvol_ratio"] = (v / v.rolling(20).mean()).fillna(0.0)        # "in play" intensity gate
     return out
 
 
 def backtest_symbol(s: pd.DataFrame, k: int, atr_mult: float, reward_r: float,
-                    cost_bps: float, capital: float, min_bars_left: int = 6) -> list[dict]:
-    """Walk bars: enter long when confluence>=k (flat, not near EOD); exit on gap-aware
-    ATR stop (stop-first), R-target, or EOD square-off. Returns [{ts, pnl}]. Pure."""
+                    cost_bps: float, capital: float, mode: str = "breakout",
+                    min_rvol: float = 0.0, min_bars_left: int = 6) -> list[dict]:
+    """Walk bars: when confluence>=k (flat, not near EOD, rvol>=min_rvol) take the trade —
+    LONG in 'breakout' mode, SHORT in 'fade' mode (bet the up-break reverts). Exit on
+    gap-aware ATR stop (stop-first), R-target, or EOD square-off. Returns [{ts, pnl}]. Pure."""
+    short = mode == "fade"
     trades: list[dict] = []
     pos = None
     idx = s.index
     conf = s["confluence"].to_numpy()
     atr = s["atr"].to_numpy()
     bl = s["bars_left"].to_numpy()
+    rvr = s["rvol_ratio"].to_numpy()
     O, H, L, C = (s[x].to_numpy() for x in ("open", "high", "low", "close"))
     cost = capital * cost_bps / 10000.0
     for i in range(len(idx)):
         if pos is not None:
             ex = None
-            if O[i] <= pos["stop"]:
-                ex = O[i]                      # gap below stop -> fill at open
-            elif L[i] <= pos["stop"]:
-                ex = pos["stop"]               # stop-first (conservative)
-            elif H[i] >= pos["target"]:
-                ex = pos["target"]
-            elif bl[i] == 0:
-                ex = C[i]                      # EOD square-off
+            if not short:                              # LONG: stop below, target above
+                if O[i] <= pos["stop"]:
+                    ex = O[i]                          # gap through stop -> fill at open
+                elif L[i] <= pos["stop"]:
+                    ex = pos["stop"]                   # stop-first (conservative)
+                elif H[i] >= pos["target"]:
+                    ex = pos["target"]
+                elif bl[i] == 0:
+                    ex = C[i]                          # EOD square-off
+            else:                                      # SHORT (fade): stop above, target below
+                if O[i] >= pos["stop"]:
+                    ex = O[i]                          # gap through stop -> fill at open
+                elif H[i] >= pos["stop"]:
+                    ex = pos["stop"]
+                elif L[i] <= pos["target"]:
+                    ex = pos["target"]
+                elif bl[i] == 0:
+                    ex = C[i]
             if ex is not None:
                 qty = capital / pos["entry"]
-                trades.append({"ts": pos["ts"], "pnl": round((ex - pos["entry"]) * qty - cost, 2)})
+                sgn = -1.0 if short else 1.0
+                trades.append({"ts": pos["ts"], "pnl": round(sgn * (ex - pos["entry"]) * qty - cost, 2)})
                 pos = None
-        if pos is None and bl[i] >= min_bars_left and conf[i] >= k and atr[i] > 0:
+        if pos is None and bl[i] >= min_bars_left and conf[i] >= k and atr[i] > 0 and rvr[i] >= min_rvol:
             entry = C[i]
-            stop = entry - atr_mult * atr[i]
-            pos = {"entry": entry, "stop": stop, "target": entry + reward_r * atr_mult * atr[i],
-                   "ts": idx[i]}
+            risk = atr_mult * atr[i]
+            stop = entry + risk if short else entry - risk
+            target = entry - reward_r * risk if short else entry + reward_r * risk
+            pos = {"entry": entry, "stop": stop, "target": target, "ts": idx[i]}
     return trades
 
 
@@ -162,13 +180,14 @@ async def _run(args) -> int:
         print("no symbols had data — check the interval/backfill")
         return 1
 
-    print(f"confluence breakout: {len(per_symbol)} symbols · {args.interval} · {from_dt}..{to_dt}  "
-          f"(OOS split @ {mid.isoformat()}) · K in {ks}")
+    print(f"confluence {args.mode}: {len(per_symbol)} symbols · {args.interval} · {from_dt}..{to_dt}  "
+          f"(OOS split @ {mid.isoformat()}) · K in {ks} · min_rvol={args.min_rvol}")
     results: dict[str, dict] = {}
     for k in ks:
         trades: list[dict] = []
         for sdf in per_symbol.values():
-            trades += backtest_symbol(sdf, k, args.atr_mult, args.reward_r, args.cost_bps, args.capital)
+            trades += backtest_symbol(sdf, k, args.atr_mult, args.reward_r, args.cost_bps,
+                                      args.capital, mode=args.mode, min_rvol=args.min_rvol)
         results[f"K={k}"] = {"trades": trades}
         net = sum(t["pnl"] for t in trades)
         wins = sum(1 for t in trades if t["pnl"] > 0)
@@ -180,7 +199,7 @@ async def _run(args) -> int:
     report = report_from_results(results, args.capital, n_splits=args.n_splits)
     report["trades_per_config"] = {k: len(v["trades"]) for k, v in results.items()}
     os.makedirs(args.out_dir, exist_ok=True)
-    out = os.path.join(args.out_dir, "confluence_breakout.json")
+    out = os.path.join(args.out_dir, f"confluence_{args.mode}.json")
     with open(out, "w", encoding="utf-8") as fh:
         json.dump(report, fh, indent=2, default=str)
     print("\n=== K-sweep verdict (Deflated Sharpe + PBO) ===")
@@ -198,6 +217,10 @@ def main() -> None:
     p.add_argument("--to", dest="to_date", required=True, help="YYYY-MM-DD")
     p.add_argument("--interval", default="5m")
     p.add_argument("--k-values", dest="k_values", default="4,5,6,7,8", help="confirmation thresholds to sweep")
+    p.add_argument("--mode", choices=["breakout", "fade"], default="breakout",
+                   help="breakout = long the break; fade = short it (bet it reverts)")
+    p.add_argument("--min-rvol", dest="min_rvol", type=float, default=0.0,
+                   help="require bar volume >= this x 20-bar avg to enter (0 = off; ~3 = 'in play')")
     p.add_argument("--atr-mult", dest="atr_mult", type=float, default=1.5, help="stop = entry - atr_mult*ATR")
     p.add_argument("--reward-r", dest="reward_r", type=float, default=2.0, help="target = entry + reward_r*risk")
     p.add_argument("--cost-bps", dest="cost_bps", type=float, default=10.0, help="round-trip cost, bps of notional")
