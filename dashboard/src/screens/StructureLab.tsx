@@ -1,6 +1,7 @@
-// §10 Phase 6 — Structure Lab: pick an options structure and see its expiry payoff,
-// net Greeks, scenario/stress VaR, SPAN margin, and expiry verdict (all from the
-// backend Phase 5 engines). Paper analysis tool — places no orders.
+// §10 Phase 6 — Structure Builder: compose ANY options structure leg-by-leg (or start
+// from a preset) and see its expiry payoff, net Greeks, scenario/stress VaR, SPAN margin,
+// and expiry verdict (all from the backend Phase 5 engines). Paper analysis tool — places
+// no orders. Legs are fully editable; the analysis re-runs live on every change.
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 
@@ -53,40 +54,45 @@ function PayoffChart({ curve, breakevens, spot }: { curve: any[]; breakevens: nu
 }
 
 export function StructureLab() {
-  const [preset, setPreset] = useState<string>("Bull call spread");
   const [spot, setSpot] = useState<number>(20000);
   const [iv, setIv] = useState<number>(0.15);
   const [dte, setDte] = useState<number>(7);
+  const [legs, setLegs] = useState<Leg[]>(() => PRESETS["Bull call spread"](20000));
   const [res, setRes] = useState<any>(null);
   const [err, setErr] = useState<string>("");
 
   useEffect(() => {
     let live = true;
-    const legs = PRESETS[preset](spot);
+    if (!legs.length) { setRes(null); setErr(""); return; }
     api
       .analyzeStructure({ spot, iv, dte, lot_size: 50, legs })
       .then((r) => live && (setRes(r), setErr("")))
       .catch((e) => live && setErr(String(e)));
-    return () => {
-      live = false;
-    };
-  }, [preset, spot, iv, dte]);
+    return () => { live = false; };
+  }, [legs, spot, iv, dte]);
+
+  const setLeg = (i: number, patch: Partial<Leg>) =>
+    setLegs((ls) => ls.map((l, j) => (j === i ? { ...l, ...patch } : l)));
+  const addLeg = () => setLegs((ls) => [...ls, { opt: "CE", strike: r50(spot), side: "BUY", lots: 1 }]);
+  const delLeg = (i: number) => setLegs((ls) => ls.filter((_, j) => j !== i));
 
   const g = res?.net_greeks ?? {};
   return (
     <div className="flex h-full flex-col">
       <div className="flex items-center gap-3 border-b px-3 py-2">
-        <span className="eyebrow">Structure Lab</span>
-        <span className="text-micro text-text-faint">payoff · greeks · stress-VaR · SPAN — paper only, no orders</span>
+        <span className="eyebrow">Structure Builder</span>
+        <span className="text-micro text-text-faint">compose any structure · payoff · greeks · stress-VaR · SPAN — paper only, no orders</span>
       </div>
 
+      {/* presets seed the builder; spot / IV / DTE context */}
       <div className="flex flex-wrap items-center gap-2 border-b px-3 py-2 text-dense">
+        <span className="text-text-faint">preset:</span>
         {Object.keys(PRESETS).map((p) => (
           <button
             key={p}
-            onClick={() => setPreset(p)}
+            onClick={() => setLegs(PRESETS[p](spot))}
             className="rounded-control border px-2 py-0.5"
-            style={{ borderColor: p === preset ? "var(--long)" : "var(--line)", color: p === preset ? "var(--long)" : "var(--text-lo)" }}
+            style={{ borderColor: "var(--line)", color: "var(--text-lo)" }}
           >
             {p}
           </button>
@@ -94,6 +100,44 @@ export function StructureLab() {
         <span className="ml-2">spot <input type="number" value={spot} onChange={(e) => setSpot(+e.target.value || 0)} className="w-24 rounded-control border bg-surface px-1" /></span>
         <span>IV <input type="number" step="0.01" value={iv} onChange={(e) => setIv(+e.target.value || 0)} className="w-16 rounded-control border bg-surface px-1" /></span>
         <span>DTE <input type="number" value={dte} onChange={(e) => setDte(+e.target.value || 0)} className="w-14 rounded-control border bg-surface px-1" /></span>
+      </div>
+
+      {/* editable legs — the builder */}
+      <div className="border-b px-3 py-2">
+        <div className="mb-1 flex items-center gap-2">
+          <span className="eyebrow">Legs</span>
+          <button onClick={addLeg} className="rounded-control border px-2 py-0.5 text-micro" style={{ borderColor: "var(--long)", color: "var(--long)" }}>+ add leg</button>
+          <span className="text-micro text-text-faint">edit any field — analysis updates live</span>
+        </div>
+        <table className="w-full text-dense">
+          <thead className="text-micro text-text-faint">
+            <tr><th className="text-left font-normal">type</th><th className="text-left font-normal">side</th><th className="text-left font-normal">strike</th><th className="text-left font-normal">lots</th><th></th></tr>
+          </thead>
+          <tbody>
+            {legs.map((l, i) => (
+              <tr key={i}>
+                <td className="py-0.5">
+                  <select value={l.opt} onChange={(e) => setLeg(i, { opt: e.target.value })} className="rounded-control border bg-surface px-1">
+                    <option value="CE">CE</option>
+                    <option value="PE">PE</option>
+                  </select>
+                </td>
+                <td className="py-0.5">
+                  <select value={l.side} onChange={(e) => setLeg(i, { side: e.target.value })} className="rounded-control border bg-surface px-1" style={{ color: l.side === "BUY" ? "var(--long)" : "var(--short)" }}>
+                    <option value="BUY">BUY</option>
+                    <option value="SELL">SELL</option>
+                  </select>
+                </td>
+                <td className="py-0.5"><input type="number" step={STEP} value={l.strike} onChange={(e) => setLeg(i, { strike: +e.target.value || 0 })} className="w-24 rounded-control border bg-surface px-1" /></td>
+                <td className="py-0.5"><input type="number" min={1} value={l.lots} onChange={(e) => setLeg(i, { lots: Math.max(1, +e.target.value || 1) })} className="w-16 rounded-control border bg-surface px-1" /></td>
+                <td className="py-0.5 text-right"><button onClick={() => delLeg(i)} title="remove leg" className="text-micro" style={{ color: "var(--text-faint)" }}>✕</button></td>
+              </tr>
+            ))}
+            {!legs.length && (
+              <tr><td colSpan={5} className="py-1 text-micro text-text-faint">no legs — add one or pick a preset</td></tr>
+            )}
+          </tbody>
+        </table>
       </div>
 
       <div className="min-h-0 flex-1 overflow-auto p-3">
